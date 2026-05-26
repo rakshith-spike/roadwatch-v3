@@ -69,6 +69,12 @@ export interface Project {
   id: string;
   title: string;
   description: string;
+  roadType: 'NH' | 'SH' | 'MDR' | 'ODR' | 'Urban Arterial' | 'Ward Road' | 'Expressway';
+  lastRelayingDate: string;
+  responsibleAuthority: string;
+  executiveEngineer: string;
+  budgetSource: string;
+  qualityScore?: number;
   contractor: string;
   contractorName?: string;
   budget: number;
@@ -115,6 +121,8 @@ export interface BudgetEntry {
   approvedBy?: string;
   notes?: string;
   district: string;
+  source?: string;
+  sanctionReference?: string;
 }
 
 export interface SystemUser {
@@ -273,6 +281,11 @@ const mockProjects: Project[] = [
   {
     id: 'P001', title: 'MG Road Pothole Repair',
     description: 'Emergency repair of critical potholes on MG Road stretch',
+    roadType: 'MDR', lastRelayingDate: '2023-11-12',
+    responsibleAuthority: 'BBMP Road Infrastructure Division',
+    executiveEngineer: 'Er. Kavitha Rao, East Zone',
+    budgetSource: 'BBMP Ward Infrastructure Grant FY 2024-25',
+    qualityScore: 72,
     contractor: 'contractor1', contractorName: 'Kumar Infrastructure Pvt Ltd',
     budget: 500000, spent: 320000, startDate: '2024-01-16', endDate: '2024-01-25',
     status: 'in_progress', progress: 65,
@@ -293,6 +306,11 @@ const mockProjects: Project[] = [
   {
     id: 'P002', title: 'Koramangala Street Light Restoration',
     description: 'Restoration of non-functional street lights in 5th Block',
+    roadType: 'Ward Road', lastRelayingDate: '2022-09-28',
+    responsibleAuthority: 'BBMP Electrical and Road Safety Cell',
+    executiveEngineer: 'Er. Meera Iyer, South Zone',
+    budgetSource: 'Urban Safety and Street Lighting Fund',
+    qualityScore: 81,
     contractor: 'contractor2', contractorName: 'Sharma Constructions',
     budget: 150000, spent: 45000, startDate: '2024-01-18', endDate: '2024-01-22',
     status: 'in_progress', progress: 30,
@@ -311,6 +329,11 @@ const mockProjects: Project[] = [
   {
     id: 'P003', title: 'HSR Layout Road Resurfacing',
     description: 'Full road resurfacing for 2km stretch in HSR Layout',
+    roadType: 'Urban Arterial', lastRelayingDate: '2021-06-14',
+    responsibleAuthority: 'Public Works Department - Urban Roads',
+    executiveEngineer: 'Er. Nikhil Menon, Bengaluru Urban',
+    budgetSource: 'State Urban Road Renewal Scheme',
+    qualityScore: 58,
     contractor: 'contractor3', contractorName: 'Ali Roads & Bridges',
     budget: 1200000, spent: 0, startDate: '2024-02-01', endDate: '2024-02-28',
     status: 'planned', progress: 0,
@@ -329,11 +352,11 @@ const mockProjects: Project[] = [
 ];
 
 const mockBudgetEntries: BudgetEntry[] = [
-  { id: 'B001', projectId: 'P001', projectTitle: 'MG Road Pothole Repair', contractor: 'Kumar Infrastructure Pvt Ltd', amount: 500000, type: 'allocation', status: 'approved', requestedAt: '2024-01-15', approvedAt: '2024-01-16', approvedBy: 'Dr. Ananya Reddy', district: 'Bangalore Urban' },
-  { id: 'B002', projectId: 'P002', projectTitle: 'Koramangala Street Light Restoration', contractor: 'Sharma Constructions', amount: 150000, type: 'allocation', status: 'approved', requestedAt: '2024-01-17', approvedAt: '2024-01-18', approvedBy: 'Dr. Ananya Reddy', district: 'Bangalore Urban' },
-  { id: 'B003', projectId: 'P003', projectTitle: 'HSR Layout Road Resurfacing', contractor: 'Ali Roads & Bridges', amount: 1200000, type: 'allocation', status: 'approved', requestedAt: '2024-01-25', approvedAt: '2024-01-26', approvedBy: 'Dr. Ananya Reddy', district: 'Bangalore Urban' },
-  { id: 'B004', projectId: 'P001', projectTitle: 'MG Road Pothole Repair', contractor: 'Kumar Infrastructure Pvt Ltd', amount: 80000, type: 'request', status: 'pending', requestedAt: '2024-01-19', notes: 'Additional bitumen needed due to scope increase', district: 'Bangalore Urban' },
-  { id: 'B005', projectId: 'P002', projectTitle: 'Koramangala Street Light Restoration', contractor: 'Sharma Constructions', amount: 45000, type: 'disbursement', status: 'approved', requestedAt: '2024-01-20', approvedAt: '2024-01-20', approvedBy: 'Dr. Ananya Reddy', district: 'Bangalore Urban' },
+  { id: 'B001', projectId: 'P001', projectTitle: 'MG Road Pothole Repair', contractor: 'Kumar Infrastructure Pvt Ltd', amount: 500000, type: 'allocation', status: 'approved', requestedAt: '2024-01-15', approvedAt: '2024-01-16', approvedBy: 'Dr. Ananya Reddy', district: 'Bangalore Urban', source: 'BBMP Ward Infrastructure Grant FY 2024-25', sanctionReference: 'BBMP/RD/2024/0015' },
+  { id: 'B002', projectId: 'P002', projectTitle: 'Koramangala Street Light Restoration', contractor: 'Sharma Constructions', amount: 150000, type: 'allocation', status: 'approved', requestedAt: '2024-01-17', approvedAt: '2024-01-18', approvedBy: 'Dr. Ananya Reddy', district: 'Bangalore Urban', source: 'Urban Safety and Street Lighting Fund', sanctionReference: 'BBMP/EL/2024/0031' },
+  { id: 'B003', projectId: 'P003', projectTitle: 'HSR Layout Road Resurfacing', contractor: 'Ali Roads & Bridges', amount: 1200000, type: 'allocation', status: 'approved', requestedAt: '2024-01-25', approvedAt: '2024-01-26', approvedBy: 'Dr. Ananya Reddy', district: 'Bangalore Urban', source: 'State Urban Road Renewal Scheme', sanctionReference: 'PWD/URR/2024/0112' },
+  { id: 'B004', projectId: 'P001', projectTitle: 'MG Road Pothole Repair', contractor: 'Kumar Infrastructure Pvt Ltd', amount: 80000, type: 'request', status: 'pending', requestedAt: '2024-01-19', notes: 'Additional bitumen needed due to scope increase', district: 'Bangalore Urban', source: 'BBMP Ward Infrastructure Grant FY 2024-25', sanctionReference: 'Pending revision' },
+  { id: 'B005', projectId: 'P002', projectTitle: 'Koramangala Street Light Restoration', contractor: 'Sharma Constructions', amount: 45000, type: 'disbursement', status: 'approved', requestedAt: '2024-01-20', approvedAt: '2024-01-20', approvedBy: 'Dr. Ananya Reddy', district: 'Bangalore Urban', source: 'Urban Safety and Street Lighting Fund', sanctionReference: 'BBMP/EL/DISB/2024/0038' },
 ];
 
 const mockSystemUsers: SystemUser[] = [
@@ -347,6 +370,24 @@ const mockSystemUsers: SystemUser[] = [
   { id: 'u8', name: 'Mohammed Ali', email: 'mali@ali-roads.com', role: 'contractor', district: 'Bangalore Urban', state: 'Karnataka', isActive: true, createdAt: '2019-11-10', lastLogin: '2024-01-15' },
 ];
 
+function getStoredSystemUsers(): SystemUser[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const stored = localStorage.getItem('roadwatch_registered_users');
+    if (!stored) return [];
+    return JSON.parse(stored) as SystemUser[];
+  } catch {
+    return [];
+  }
+}
+
+function persistRegisteredUsers(users: SystemUser[]) {
+  if (typeof localStorage === 'undefined') return;
+  const mockEmails = new Set(mockSystemUsers.map((user) => user.email.toLowerCase()));
+  const registeredOnly = users.filter((user) => !mockEmails.has(user.email.toLowerCase()));
+  localStorage.setItem('roadwatch_registered_users', JSON.stringify(registeredOnly));
+}
+
 // ── Store ──────────────────────────────────────────────────────────────────────
 
 export const useStore = create<AppState>((set) => ({
@@ -356,7 +397,12 @@ export const useStore = create<AppState>((set) => ({
   contractors: mockContractors,
   projects: mockProjects,
   budgetEntries: mockBudgetEntries,
-  systemUsers: mockSystemUsers,
+  systemUsers: [
+    ...getStoredSystemUsers(),
+    ...mockSystemUsers.filter((mockUser) =>
+      !getStoredSystemUsers().some((storedUser) => storedUser.email.toLowerCase() === mockUser.email.toLowerCase())
+    )
+  ],
   sidebarOpen: true,
   currentView: 'dashboard',
   notifications: [
@@ -396,6 +442,7 @@ export const useStore = create<AppState>((set) => ({
       api.logout();
     } catch { /* ignore */ }
     localStorage.removeItem('roadwatch_token');
+    localStorage.removeItem('roadwatch_demo_session');
     set({ user: null, isAuthenticated: false, currentView: 'dashboard' });
   },
 
@@ -461,5 +508,12 @@ export const useStore = create<AppState>((set) => ({
   toggleUserStatus: (id) => set((state) => ({
     systemUsers: state.systemUsers.map((u) => u.id === id ? { ...u, isActive: !u.isActive } : u)
   })),
-  addSystemUser: (user) => set((state) => ({ systemUsers: [user, ...state.systemUsers] })),
+  addSystemUser: (user) => set((state) => {
+    const exists = state.systemUsers.some((existing) => existing.email.toLowerCase() === user.email.toLowerCase());
+    const systemUsers = exists
+      ? state.systemUsers.map((existing) => existing.email.toLowerCase() === user.email.toLowerCase() ? { ...existing, ...user } : existing)
+      : [user, ...state.systemUsers];
+    persistRegisteredUsers(systemUsers);
+    return { systemUsers };
+  }),
 }));

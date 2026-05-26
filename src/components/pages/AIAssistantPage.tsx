@@ -16,7 +16,10 @@ import {
   RotateCcw,
   Lightbulb,
   BarChart3,
-  HelpCircle
+  HelpCircle,
+  Truck,
+  Wallet,
+  ShieldCheck
 } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
@@ -31,21 +34,44 @@ interface Message {
 }
 
 const suggestedPrompts = [
-  { icon: AlertCircle, text: 'Show me critical issues in my area' },
-  { icon: TrendingUp, text: 'What are the trending complaint types?' },
-  { icon: MapPin, text: 'Find nearest repair work in progress' },
-  { icon: BarChart3, text: 'Show analytics for this month' },
-  { icon: FileText, text: 'Help me file a new complaint' },
-  { icon: HelpCircle, text: 'How does the complaint process work?' }
+  { icon: Wallet, text: 'What is the estimate for MG Road?' },
+  { icon: Truck, text: 'Who is the contractor for HSR Layout road?' },
+  { icon: AlertCircle, text: 'Show pending complaints and their severity' },
+  { icon: MapPin, text: 'Give me details for Koramangala road work' },
+  { icon: BarChart3, text: 'Compare budget allocated and spent' },
+  { icon: ShieldCheck, text: 'Which authority handles drainage complaints?' }
 ];
 
+const formatMoney = (value: number) => `₹${value.toLocaleString('en-IN')}`;
+
+function normalize(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function statusLabel(value: string) {
+  return value.replace(/_/g, ' ');
+}
+
+const queryStopWords = new Set([
+  'what', 'which', 'where', 'when', 'who', 'whom', 'whose', 'is', 'are', 'was', 'were',
+  'the', 'for', 'and', 'or', 'to', 'of', 'in', 'on', 'me', 'show', 'give', 'tell',
+  'road', 'roads', 'work', 'project', 'details', 'status', 'estimate', 'estimated',
+  'budget', 'cost', 'spent', 'contractor', 'constructor'
+]);
+
+function queryTokens(query: string) {
+  return normalize(query)
+    .split(' ')
+    .filter((word) => word.length > 2 && !queryStopWords.has(word));
+}
+
 export function AIAssistantPage() {
-  const { user, complaints } = useStore();
+  const { user, complaints, projects, contractors, budgetEntries, setCurrentView } = useStore();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       role: 'assistant',
-      content: `Hello${user?.name ? `, ${user.name.split(' ')[0]}` : ''}! 👋 I'm ROAD-WATCH AI Assistant, here to help you with:\n\n• Filing and tracking complaints\n• Finding information about road issues\n• Understanding repair status and timelines\n• Getting insights and analytics\n\nHow can I assist you today?`,
+      content: `Hello${user?.name ? `, ${user.name.split(' ')[0]}` : ''}! I'm ROAD-WATCH AI Assistant. Ask me about any road, contractor, complaint, estimate, budget, spend, authority routing, work progress, or repair history in this prototype.\n\nTry: "What is the estimate for MG Road?", "Who is contractor for HSR Layout?", or "Show pending pothole complaints."`,
       timestamp: new Date(),
       actions: [
         { label: 'Report Issue', icon: AlertCircle },
@@ -78,7 +104,7 @@ export function AIAssistantPage() {
 
     // Simulate AI response
     setTimeout(() => {
-      const responses = getAIResponse(inputValue.toLowerCase());
+      const responses = getAIResponse(inputValue);
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -91,10 +117,163 @@ export function AIAssistantPage() {
     }, 1500);
   };
 
-  const getAIResponse = (query: string): { content: string; actions?: Message['actions'] } => {
+  const findProject = (query: string) => {
+    const tokens = queryTokens(query);
+    const scored = projects.map((project) => {
+      const haystack = normalize(`${project.id} ${project.title} ${project.description} ${project.location.address} ${project.location.district}`);
+      const exactTitle = haystack.includes(normalize(query)) ? 10 : 0;
+      const score = tokens.reduce((sum, token) => sum + (haystack.includes(token) ? 1 : 0), exactTitle);
+      return { project, score };
+    }).sort((a, b) => b.score - a.score);
+
+    return scored[0]?.score > 0 ? scored[0].project : undefined;
+  };
+
+  const findComplaint = (query: string) => {
+    const tokens = queryTokens(query);
+    const scored = complaints.map((complaint) => {
+      const haystack = normalize(`${complaint.id} ${complaint.title} ${complaint.description} ${complaint.category} ${complaint.location.address}`);
+      const idMatch = normalize(query).includes(normalize(complaint.id)) ? 10 : 0;
+      const score = tokens.reduce((sum, token) => sum + (haystack.includes(token) ? 1 : 0), idMatch);
+      return { complaint, score };
+    }).sort((a, b) => b.score - a.score);
+
+    return scored[0]?.score > 0 ? scored[0].complaint : undefined;
+  };
+
+  const projectAnswer = (project: typeof projects[number]) => {
+    const contractor = contractors.find((item) => item.id === project.contractor);
+    const linkedComplaints = complaints.filter((complaint) => project.complaints.includes(complaint.id));
+    const projectBudgets = budgetEntries.filter((entry) => entry.projectId === project.id);
+    const pendingBudget = projectBudgets.filter((entry) => entry.status === 'pending').reduce((sum, entry) => sum + entry.amount, 0);
+    const lastLog = project.workLogs?.[project.workLogs.length - 1];
+
+    return `Here are the details I found for **${project.title}**:\n\n` +
+      `• Road/location: ${project.location.address}, ${project.location.district}\n` +
+      `• Road type: **${project.roadType}**, last relayed on ${project.lastRelayingDate}\n` +
+      `• Responsible authority: ${project.responsibleAuthority}\n` +
+      `• Executive Engineer: ${project.executiveEngineer}\n` +
+      `• Status: ${statusLabel(project.status)} at ${project.progress}% progress\n` +
+      `• Estimated / sanctioned budget: **${formatMoney(project.budget)}**\n` +
+      `• Amount spent so far: **${formatMoney(project.spent)}** (${Math.round((project.spent / project.budget) * 100)}%)\n` +
+      `• Budget source: ${project.budgetSource}\n` +
+      `• Road quality score: ${project.qualityScore || 'Not recorded'}/100\n` +
+      `• Remaining balance: **${formatMoney(project.budget - project.spent)}**\n` +
+      `• Contractor: **${contractor?.company || project.contractorName || project.contractor}**${contractor ? `, license ${contractor.license}, rating ${contractor.rating}/5` : ''}\n` +
+      `• Approved by: ${project.approvedBy || 'Not recorded'}\n` +
+      `• Timeline: ${project.startDate} to ${project.endDate}\n` +
+      `• Linked complaints: ${linkedComplaints.length ? linkedComplaints.map((complaint) => `${complaint.id} (${complaint.severity}, ${statusLabel(complaint.status)})`).join(', ') : 'None'}\n` +
+      `• Pending budget requests: ${pendingBudget ? formatMoney(pendingBudget) : 'None'}\n` +
+      `• Latest work update: ${lastLog ? `${lastLog.date} - ${lastLog.description}` : 'No work log uploaded yet'}\n\n` +
+      `Transparency note: citizens can inspect contractor responsibility, spend, progress and linked complaint history for this road.`;
+  };
+
+  const complaintAnswer = (complaint: typeof complaints[number]) => {
+    const relatedProject = projects.find((project) => project.complaints.includes(complaint.id));
+    const assignedContractor = contractors.find((contractor) => contractor.id === complaint.assignedTo);
+
+    return `Complaint **${complaint.id}: ${complaint.title}**\n\n` +
+      `• Category: ${complaint.category}\n` +
+      `• Severity: **${complaint.severity}**\n` +
+      `• Status: ${statusLabel(complaint.status)}\n` +
+      `• Location: ${complaint.location.address}, ${complaint.location.district}\n` +
+      `• Votes/comments: ${complaint.votes} votes, ${complaint.comments} comments\n` +
+      `• AI estimate: ${complaint.aiAnalysis ? `${formatMoney(complaint.aiAnalysis.estimatedCost)} with priority ${complaint.aiAnalysis.priority}/100` : 'Not available'}\n` +
+      `• Assigned contractor: ${assignedContractor?.company || complaint.assignedTo || 'Not assigned yet'}\n` +
+      `• Related project: ${relatedProject ? `${relatedProject.title}, ${projectStatusLine(relatedProject)}` : 'No linked project yet'}\n\n` +
+      `Recommended next step: ${complaint.status === 'pending' ? 'government verification and authority routing' : complaint.status === 'verified' ? 'assign a qualified contractor' : complaint.status === 'resolved' ? 'citizen closure feedback' : 'monitor SLA and work evidence'}.`;
+  };
+
+  const projectStatusLine = (project: typeof projects[number]) =>
+    `${statusLabel(project.status)}, ${project.progress}% complete, ${formatMoney(project.spent)} spent of ${formatMoney(project.budget)}`;
+
+  const routingAnswer = (query: string) => {
+    const q = normalize(query);
+    if (q.includes('drain') || q.includes('flood') || q.includes('water')) {
+      return 'Drainage, flooding and waterlogging complaints should be routed to the Stormwater / Drainage authority first, with Executive Engineer escalation for repeated flooding or public safety risk.';
+    }
+    if (q.includes('light') || q.includes('lamp') || q.includes('wire')) {
+      return 'Streetlight complaints should be routed to the Electrical division. Exposed wiring or dark junctions should be treated as high priority safety issues.';
+    }
+    if (q.includes('pothole') || q.includes('crack') || q.includes('road')) {
+      return 'Potholes, cracks and road-surface failures should be routed to the Road Works Executive Engineer. Critical arterial-road damage should also notify traffic coordination.';
+    }
+    return 'Routing rule: classify the complaint by issue type, locate the road authority for that ward/district, assign severity from AI analysis, then escalate critical issues to the Executive Engineer and relevant safety department.';
+  };
+
+  const getAIResponse = (rawQuery: string): { content: string; actions?: Message['actions'] } => {
+    const query = normalize(rawQuery);
+    const matchedProject = findProject(rawQuery);
+    const matchedComplaint = findComplaint(rawQuery);
+    const asksMoney = ['estimate', 'estimated', 'budget', 'cost', 'spent', 'sanction', 'allocation', 'amount'].some((word) => query.includes(word));
+    const asksContractor = ['contractor', 'constructor', 'company', 'license', 'who is doing', 'who handles'].some((word) => query.includes(word));
+    const asksProgress = ['progress', 'status', 'timeline', 'completion', 'work', 'repair history'].some((word) => query.includes(word));
+    const asksAuthority = ['authority', 'route', 'routing', 'engineer', 'department', 'responsible'].some((word) => query.includes(word));
+
+    if (matchedProject && (asksMoney || asksContractor || asksProgress || query.includes('road'))) {
+      return {
+        content: projectAnswer(matchedProject),
+        actions: [
+          { label: 'Open Projects', icon: FileText },
+          { label: 'View Budget', icon: BarChart3 }
+        ]
+      };
+    }
+
+    if (matchedComplaint && (query.includes('complaint') || query.includes('issue') || query.includes('status') || asksMoney)) {
+      return {
+        content: complaintAnswer(matchedComplaint),
+        actions: [
+          { label: 'Open Complaints', icon: AlertCircle },
+          { label: 'View Map', icon: MapPin }
+        ]
+      };
+    }
+
+    if (asksAuthority) {
+      return {
+        content: `${routingAnswer(rawQuery)}\n\nFor accountability, ROAD-WATCH should show the receiving authority, escalation owner, assigned contractor, SLA deadline and final closure proof for each complaint.`,
+        actions: [
+          { label: 'Open Complaints', icon: AlertCircle },
+          { label: 'View Help', icon: HelpCircle }
+        ]
+      };
+    }
+
+    if (asksMoney) {
+      const totalBudget = projects.reduce((sum, project) => sum + project.budget, 0);
+      const totalSpent = projects.reduce((sum, project) => sum + project.spent, 0);
+      const pending = budgetEntries.filter((entry) => entry.status === 'pending').reduce((sum, entry) => sum + entry.amount, 0);
+      const projectLines = projects.map((project) =>
+        `• ${project.title} (${project.roadType}): ${formatMoney(project.budget)} sanctioned from ${project.budgetSource}, ${formatMoney(project.spent)} spent, ${project.progress}% complete`
+      ).join('\n');
+
+      return {
+        content: `Budget overview from current ROAD-WATCH records:\n\n${projectLines}\n\nTotal sanctioned: **${formatMoney(totalBudget)}**\nTotal spent: **${formatMoney(totalSpent)}**\nPending budget requests: **${formatMoney(pending)}**\n\nAsk for a specific road name, like "estimate for MG Road", and I can break down contractor, spend, complaint links and latest work logs.`,
+        actions: [
+          { label: 'Open Budget', icon: BarChart3 },
+          { label: 'Transparency', icon: FileText }
+        ]
+      };
+    }
+
+    if (asksContractor) {
+      const contractorLines = contractors.map((contractor) =>
+        `• ${contractor.company}: ${contractor.rating}/5 rating, ${contractor.completedProjects} completed, ${contractor.activeProjects} active, license ${contractor.license}, status ${contractor.status}`
+      ).join('\n');
+
+      return {
+        content: `Contractor registry:\n\n${contractorLines}\n\nFor a specific road, ask "who is contractor for MG Road" or "contractor for HSR Layout", and I will connect it to the road project and budget record.`,
+        actions: [
+          { label: 'Open Contractors', icon: Truck },
+          { label: 'View Projects', icon: FileText }
+        ]
+      };
+    }
+
     if (query.includes('critical') || query.includes('urgent')) {
       return {
-        content: `Based on current data, there are **${complaints.filter(c => c.severity === 'critical').length} critical issues** in your region:\n\n1. **Large Pothole on MG Road** - Critical severity, affecting traffic\n2. **Drainage Overflow** - High risk during monsoon\n\nThese issues have high priority scores and are being fast-tracked for resolution. Would you like me to show these on the map or provide more details?`,
+        content: `Based on current data, there are **${complaints.filter(c => c.severity === 'critical').length} critical issues** in your region:\n\n${complaints.filter(c => c.severity === 'critical').map((complaint) => `• ${complaint.id}: ${complaint.title} at ${complaint.location.address} - ${statusLabel(complaint.status)}, priority ${complaint.aiAnalysis?.priority || 'NA'}/100`).join('\n') || 'No critical complaints are currently open.'}\n\nCritical road-safety issues should be routed to the Executive Engineer and monitored until contractor proof is uploaded.`,
         actions: [
           { label: 'View on Map', icon: MapPin },
           { label: 'Get Details', icon: FileText }
@@ -103,8 +282,9 @@ export function AIAssistantPage() {
     }
 
     if (query.includes('file') || query.includes('report') || query.includes('complaint')) {
+      const pending = complaints.filter((complaint) => complaint.status !== 'resolved');
       return {
-        content: `I can help you file a new complaint! Here's the process:\n\n**Step 1:** Describe the issue (pothole, street light, drainage, etc.)\n**Step 2:** Add photos or videos for faster processing\n**Step 3:** Confirm your location (I can auto-detect)\n**Step 4:** Submit and receive tracking ID\n\n🤖 **AI Features:**\n• Auto-categorization of your issue\n• Severity assessment\n• Duplicate detection\n• Estimated resolution time\n\nShall I start the complaint process now?`,
+        content: `Complaint support:\n\nCurrent unresolved complaints: **${pending.length}**\n${pending.slice(0, 5).map((complaint) => `• ${complaint.id}: ${complaint.title} - ${complaint.severity}, ${statusLabel(complaint.status)}, est. ${formatMoney(complaint.aiAnalysis?.estimatedCost || 0)}`).join('\n')}\n\nTo file a new complaint, upload a road photo. The app auto-detects pothole/crack/drainage/flooding/streetlight/debris, suggests severity, estimates cost, and still lets the user manually override the category.`,
         actions: [
           { label: 'Start Filing', icon: AlertCircle },
           { label: 'View Examples', icon: FileText }
@@ -113,8 +293,9 @@ export function AIAssistantPage() {
     }
 
     if (query.includes('status') || query.includes('track')) {
+      const activeProjects = projects.filter((project) => project.status !== 'completed');
       return {
-        content: `Here's the status of your recent complaints:\n\n📋 **C001 - Pothole on MG Road**\n• Status: In Progress (65% complete)\n• Assigned to: Kumar Infrastructure\n• Expected completion: Jan 25, 2024\n\n📋 **C002 - Street Light Issue**\n• Status: Assigned\n• Contractor notified: 2 hours ago\n\nWould you like me to send you updates when there's progress?`,
+        content: `Current active road-work status:\n\n${activeProjects.map((project) => `• ${project.title}: ${projectStatusLine(project)}`).join('\n')}\n\nFor complaint tracking, ask with a complaint ID such as "status of C003" or with a road name like "MG Road progress".`,
         actions: [
           { label: 'Enable Notifications', icon: AlertCircle },
           { label: 'View All', icon: FileText }
@@ -123,8 +304,13 @@ export function AIAssistantPage() {
     }
 
     if (query.includes('analytics') || query.includes('statistics') || query.includes('trending')) {
+      const categoryCounts = complaints.reduce<Record<string, number>>((acc, complaint) => {
+        acc[complaint.category] = (acc[complaint.category] || 0) + 1;
+        return acc;
+      }, {});
+      const topCategory = Object.entries(categoryCounts).sort((a, b) => b[1] - a[1])[0];
       return {
-        content: `📊 **Analytics Summary - This Month:**\n\n• Total Complaints: ${complaints.length}\n• Resolution Rate: 82%\n• Avg Response Time: 4.2 days\n• Most Common: Potholes (42%)\n\n**Trending Issues:**\n1. Potholes (↑ 15%)\n2. Drainage (↑ 8%)\n3. Street Lights (↓ 5%)\n\n**AI Prediction:** Expect 20% more drainage complaints next week due to forecasted rain.\n\nNeed detailed charts or specific district data?`,
+        content: `Analytics summary:\n\n• Total complaints: ${complaints.length}\n• Open complaints: ${complaints.filter((complaint) => complaint.status !== 'resolved').length}\n• Resolved complaints: ${complaints.filter((complaint) => complaint.status === 'resolved').length}\n• Most common category: ${topCategory ? `${topCategory[0]} (${topCategory[1]})` : 'NA'}\n• Total project budget: ${formatMoney(projects.reduce((sum, project) => sum + project.budget, 0))}\n• Total spend recorded: ${formatMoney(projects.reduce((sum, project) => sum + project.spent, 0))}\n\nUseful follow-ups: "which roads are delayed?", "budget spent by road", or "critical drainage complaints".`,
         actions: [
           { label: 'View Charts', icon: BarChart3 },
           { label: 'Export Report', icon: FileText }
@@ -134,7 +320,7 @@ export function AIAssistantPage() {
 
     if (query.includes('how') || query.includes('process') || query.includes('work')) {
       return {
-        content: `Here's how ROAD-WATCH complaint resolution works:\n\n**1. Report** 📝\nCitizen files complaint with photos/location\n\n**2. AI Analysis** 🤖\nAutomatic categorization, severity assessment, duplicate check\n\n**3. Verification** ✅\nGovernment admin verifies the complaint\n\n**4. Assignment** 👷\nContractor assigned based on location & expertise\n\n**5. Resolution** 🔧\nContractor repairs and uploads evidence\n\n**6. Closure** ✨\nAdmin verifies, citizen rates the work\n\n**Average Timeline:** 5-10 days for standard issues\n\nAny specific step you'd like to know more about?`,
+        content: `ROAD-WATCH workflow:\n\n1. Citizen reports issue with photo/location.\n2. AI detects issue type, severity, duplicate risk and estimated cost.\n3. Government verifies and routes to the correct authority.\n4. Contractor is assigned based on region, specialization and performance.\n5. Contractor updates milestones, work logs, materials and photos.\n6. Budget spend, repair history and contractor details become visible in the transparency portal.\n7. Authority verifies completion and citizen closure feedback is captured.\n\nFor specific work, ask "work progress for MG Road" or "repair history for Koramangala".`,
         actions: [
           { label: 'File Complaint', icon: AlertCircle },
           { label: 'View FAQ', icon: HelpCircle }
@@ -143,7 +329,7 @@ export function AIAssistantPage() {
     }
 
     return {
-      content: `I understand you're asking about "${query}". Here's what I can help with:\n\n• **Report Issues:** File new complaints with AI assistance\n• **Track Status:** Check your complaint progress\n• **Find Information:** Road conditions, nearby issues\n• **Get Analytics:** Statistics and trends\n• **Understand Process:** How the system works\n\nCould you please be more specific about what you'd like to know?`,
+      content: `I can answer road-infrastructure questions using the current prototype data. Try asking in any natural format:\n\n• "What is the estimate for MG Road?"\n• "Who is the contractor for HSR Layout?"\n• "How much money was spent on Koramangala street lights?"\n• "Show pending complaints"\n• "Which authority handles drainage?"\n• "What is the repair status of C001?"\n\nI can cover road type, budget, amount spent, contractor, license, progress, complaint severity, AI cost estimate, authority routing and repair history.`,
       actions: [
         { label: 'Report Issue', icon: AlertCircle },
         { label: 'View Map', icon: MapPin }
@@ -153,6 +339,34 @@ export function AIAssistantPage() {
 
   const handlePromptClick = (prompt: string) => {
     setInputValue(prompt);
+  };
+
+  const handleAction = (label: string) => {
+    const viewByLabel: Record<string, string> = {
+      'Report Issue': 'complaints',
+      'Track Complaint': 'complaints',
+      'View Map': 'map',
+      'View on Map': 'map',
+      'Get Details': 'complaints',
+      'Start Filing': 'complaints',
+      'View Examples': 'help',
+      'Enable Notifications': 'alerts',
+      'View All': 'complaints',
+      'View Charts': 'analytics',
+      'Export Report': 'reports',
+      'File Complaint': 'complaints',
+      'View FAQ': 'help',
+      'Open Projects': 'projects',
+      'View Budget': 'budget',
+      'Open Complaints': 'complaints',
+      'Open Budget': 'budget',
+      'Transparency': 'transparency',
+      'Open Contractors': 'contractors',
+      'View Projects': 'projects',
+      'View Help': 'help'
+    };
+    const view = viewByLabel[label];
+    if (view) setCurrentView(view);
   };
 
   return (
@@ -208,6 +422,7 @@ export function AIAssistantPage() {
                           {message.actions.map((action, i) => (
                             <button
                               key={i}
+                              onClick={() => handleAction(action.label)}
                               className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-700/50 hover:bg-surface-700 rounded-lg text-xs text-white transition-colors"
                             >
                               <action.icon className="w-3.5 h-3.5" />

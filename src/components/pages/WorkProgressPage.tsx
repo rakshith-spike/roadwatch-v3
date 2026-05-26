@@ -105,7 +105,7 @@ export function WorkProgressPage() {
               <div className="flex items-start justify-between mb-3">
                 <div>
                   <h3 className="font-semibold text-white text-sm">{project.title}</h3>
-                  <p className="text-xs text-surface-400">{project.contractorName}</p>
+                  <p className="text-xs text-surface-400">{project.contractorName} • {project.roadType}</p>
                 </div>
                 <Badge variant={isOverdue ? 'danger' : daysLeft !== null && daysLeft <= 3 ? 'warning' : 'info'} dot>
                   {isOverdue ? `${Math.abs(daysLeft!)}d overdue` : daysLeft !== null ? `${daysLeft}d left` : 'Active'}
@@ -127,6 +127,7 @@ export function WorkProgressPage() {
                   <p className="text-xs text-surface-400 mb-1">Milestones</p>
                   <p className="text-sm text-white font-medium">{completedMilestones}/{project.milestones.length} done</p>
                   <p className="text-xs text-surface-400">Budget: ₹{(project.spent / 1000).toFixed(0)}K / ₹{(project.budget / 1000).toFixed(0)}K</p>
+                  <p className="text-xs text-surface-500">Last relayed: {project.lastRelayingDate}</p>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -173,11 +174,13 @@ export function WorkProgressPage() {
                         <Badge variant={getStatusColor(project.status) as any} dot>
                           {project.status.replace('_', ' ')}
                         </Badge>
+                        <Badge variant="outline">{project.roadType}</Badge>
                         {isOverdue && <Badge variant="danger" pulse>Overdue</Badge>}
                       </div>
                       <div className="flex flex-wrap gap-3 text-xs text-surface-400 mb-3">
                         <span className="flex items-center gap-1"><Users className="w-3 h-3" />{project.contractorName}</span>
                         <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{project.location.address}</span>
+                        <span className="flex items-center gap-1"><FileText className="w-3 h-3" />{project.responsibleAuthority}</span>
                         {project.endDate && (
                           <span className={`flex items-center gap-1 ${isOverdue ? 'text-danger-400' : ''}`}>
                             <Calendar className="w-3 h-3" />

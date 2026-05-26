@@ -66,7 +66,9 @@ export function BudgetPage() {
       status: 'pending',
       requestedAt: new Date().toISOString().split('T')[0],
       notes: reqNotes,
-      district: project?.location.district || 'Bangalore Urban'
+      district: project?.location.district || 'Bangalore Urban',
+      source: project?.budgetSource || 'Contractor variation request',
+      sanctionReference: 'Pending approval'
     });
     setRequestModal(false); setReqProject(''); setReqAmount(''); setReqNotes('');
   }
@@ -192,6 +194,7 @@ export function BudgetPage() {
                       <span className="text-xs text-surface-500 capitalize bg-surface-800 px-2 py-0.5 rounded">{entry.type}</span>
                     </div>
                     <p className="text-sm text-surface-400">{entry.contractor} • {entry.district}</p>
+                    <p className="text-xs text-surface-500 mt-1">Source: {entry.source || 'Not specified'} • Ref: {entry.sanctionReference || 'NA'}</p>
                     {entry.notes && <p className="text-xs text-surface-500 mt-1 italic">{entry.notes}</p>}
                   </div>
                 </div>

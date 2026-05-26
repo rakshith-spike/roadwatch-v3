@@ -26,10 +26,44 @@ const ROLES = [
   { id:'superadmin', label:'Super Admin',    icon:Shield,   desc:'Full platform administration',       color:'from-purple-500 to-purple-600' },
 ];
 
+const DEMO_USERS: Record<string, { id: string; name: string; email: string; role: UserRole; district?: string; state?: string }> = {
+  'citizen@demo.com': {
+    id: 'demo-citizen',
+    name: 'Amit Citizen',
+    email: 'citizen@demo.com',
+    role: 'citizen',
+    district: 'Bangalore Urban',
+    state: 'Karnataka'
+  },
+  'contractor@demo.com': {
+    id: 'contractor1',
+    name: 'Rajesh Kumar',
+    email: 'contractor@demo.com',
+    role: 'contractor',
+    district: 'Bangalore Urban',
+    state: 'Karnataka'
+  },
+  'admin@demo.com': {
+    id: 'demo-government',
+    name: 'Dr. Ananya Reddy',
+    email: 'admin@demo.com',
+    role: 'government',
+    district: 'Bangalore Urban',
+    state: 'Karnataka'
+  },
+  'superadmin@demo.com': {
+    id: 'demo-superadmin',
+    name: 'System Admin',
+    email: 'superadmin@demo.com',
+    role: 'superadmin',
+    state: 'National'
+  }
+};
+
 interface FormError { [key: string]: string }
 
 export function AuthPage() {
-  const { setUser } = useStore();
+  const { setUser, addSystemUser } = useStore();
   const [mode, setMode] = useState<'landing'|'login'|'register'>('landing');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -55,6 +89,12 @@ export function AuthPage() {
 
   // Auto-login if token exists
   useEffect(() => {
+    const demoEmail = localStorage.getItem('roadwatch_demo_session');
+    if (demoEmail && DEMO_USERS[demoEmail]) {
+      setUser(DEMO_USERS[demoEmail]);
+      return;
+    }
+
     const token = localStorage.getItem('roadwatch_token');
     if (token) {
       api.getMe().then(user => {
@@ -111,6 +151,12 @@ export function AuthPage() {
         state: res.user.state,
       });
     } catch (err: any) {
+      const demoUser = DEMO_USERS[loginEmail.toLowerCase()];
+      if (demoUser && loginPassword === 'demo123') {
+        localStorage.setItem('roadwatch_demo_session', demoUser.email);
+        setUser(demoUser);
+        return;
+      }
       setError(err.message || 'Login failed. Check your credentials.');
     } finally {
       setLoading(false);
@@ -123,18 +169,18 @@ export function AuthPage() {
     if (!validateRegister()) return;
     setLoading(true);
     try {
-      const res = await api.register({
-        name: regName.trim(),
-        email: regEmail,
-        password: regPassword,
-        role: regRole as string,
-        phone: regPhone || undefined,
-        district: regDistrict,
-        state: regState,
-      });
-      setSuccess('Account created successfully!');
-      setTimeout(() => {
-        setUser({
+      let registeredUser;
+      try {
+        const res = await api.register({
+          name: regName.trim(),
+          email: regEmail,
+          password: regPassword,
+          role: regRole as string,
+          phone: regPhone || undefined,
+          district: regDistrict,
+          state: regState,
+        });
+        registeredUser = {
           id: res.user._id || res.user.id,
           name: res.user.name,
           email: res.user.email,
@@ -142,7 +188,33 @@ export function AuthPage() {
           district: res.user.district,
           state: res.user.state,
           phone: res.user.phone,
-        });
+        };
+      } catch {
+        registeredUser = {
+          id: `local-${Date.now()}`,
+          name: regName.trim(),
+          email: regEmail,
+          role: regRole,
+          district: regDistrict,
+          state: regState,
+          phone: regPhone || undefined,
+        };
+      }
+
+      addSystemUser({
+        id: registeredUser.id,
+        name: registeredUser.name,
+        email: registeredUser.email,
+        role: registeredUser.role,
+        district: registeredUser.district,
+        state: registeredUser.state,
+        isActive: true,
+        createdAt: new Date().toISOString().split('T')[0],
+        lastLogin: new Date().toISOString().split('T')[0]
+      });
+      setSuccess('Account created successfully!');
+      setTimeout(() => {
+        setUser(registeredUser);
       }, 800);
     } catch (err: any) {
       setError(err.message || 'Registration failed. Try again.');

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Bell, Search, ChevronDown, LogOut, User, Settings, Moon, Sun, Menu
+  Bell, Search, ChevronDown, LogOut, User, Settings, Moon, Sun, Menu, Wifi, WifiOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '../../store/useStore';
@@ -13,6 +13,18 @@ export function Header() {
   const { isDark, toggle } = useTheme();
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [isOnline, setIsOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -38,6 +50,16 @@ export function Header() {
 
         {/* Right */}
         <div className="flex items-center gap-3">
+          <div className={cn(
+            'hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium',
+            isOnline
+              ? 'bg-accent-500/10 text-accent-400 border-accent-500/20'
+              : 'bg-warning-500/10 text-warning-400 border-warning-500/20'
+          )}>
+            {isOnline ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
+            {isOnline ? 'Live sync' : 'Offline queue'}
+          </div>
+
           {/* Theme Toggle — actually works now */}
           <button onClick={toggle}
             className="p-2 text-surface-400 hover:text-white hover:bg-surface-800 rounded-lg transition-colors"

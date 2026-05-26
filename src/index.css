@@ -254,3 +254,101 @@ body {
   background: rgba(255,255,255,0.8) !important;
   border-color: rgba(0,0,0,0.1) !important;
 }
+
+/* Light mode contrast repair.
+   The prototype was authored with dark surfaces and many text-white utilities.
+   These overrides keep content readable while preserving white text on solid
+   action colors and icon-gradient tiles. */
+.light-mode .bg-surface-950,
+.light-mode .bg-surface-900,
+.light-mode .bg-surface-800,
+.light-mode .bg-surface-800\/50,
+.light-mode .bg-surface-900\/50,
+.light-mode .bg-surface-900\/80,
+.light-mode .bg-surface-900\/90,
+.light-mode .bg-surface-900\/95 {
+  background-color: rgba(255, 255, 255, 0.92) !important;
+}
+
+.light-mode .from-surface-800\/80,
+.light-mode .from-surface-800 {
+  --tw-gradient-from: rgba(255, 255, 255, 0.94) var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgba(255, 255, 255, 0) var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+
+.light-mode .to-surface-900\/80,
+.light-mode .to-surface-900 {
+  --tw-gradient-to: rgba(248, 250, 252, 0.96) var(--tw-gradient-to-position) !important;
+}
+
+.light-mode .border-surface-800,
+.light-mode .border-surface-700,
+.light-mode .border-surface-700\/50,
+.light-mode .border-surface-700\/30 {
+  border-color: rgba(148, 163, 184, 0.45) !important;
+}
+
+.light-mode .text-white {
+  color: #0f172a !important;
+}
+
+.light-mode .text-surface-500,
+.light-mode .text-surface-400,
+.light-mode .text-surface-300,
+.light-mode .text-surface-200 {
+  color: #475569 !important;
+}
+
+.light-mode input,
+.light-mode textarea,
+.light-mode select {
+  color: #0f172a !important;
+}
+
+.light-mode input::placeholder,
+.light-mode textarea::placeholder {
+  color: #64748b !important;
+}
+
+.light-mode .bg-primary-500,
+.light-mode .bg-primary-600,
+.light-mode .bg-danger-500,
+.light-mode .bg-danger-600,
+.light-mode .bg-accent-500,
+.light-mode .bg-accent-600,
+.light-mode .bg-warning-500,
+.light-mode .bg-warning-600,
+.light-mode [class*="from-primary-500"],
+.light-mode [class*="from-primary-600"],
+.light-mode [class*="from-accent-500"],
+.light-mode [class*="from-accent-600"],
+.light-mode [class*="from-danger-500"],
+.light-mode [class*="from-danger-600"],
+.light-mode [class*="from-warning-500"],
+.light-mode [class*="from-warning-600"],
+.light-mode [class*="to-primary-500"],
+.light-mode [class*="to-accent-500"],
+.light-mode [class*="to-danger-500"],
+.light-mode [class*="to-warning-500"] {
+  color: #ffffff !important;
+}
+
+.light-mode .bg-primary-500 *,
+.light-mode .bg-primary-600 *,
+.light-mode .bg-danger-500 *,
+.light-mode .bg-danger-600 *,
+.light-mode .bg-accent-500 *,
+.light-mode .bg-accent-600 *,
+.light-mode .bg-warning-500 *,
+.light-mode .bg-warning-600 *,
+.light-mode [class*="from-primary-500"] .text-white,
+.light-mode [class*="from-primary-600"] .text-white,
+.light-mode [class*="from-accent-500"] .text-white,
+.light-mode [class*="from-accent-600"] .text-white,
+.light-mode [class*="from-danger-500"] .text-white,
+.light-mode [class*="from-danger-600"] .text-white,
+.light-mode [class*="from-warning-500"] .text-white,
+.light-mode [class*="from-warning-600"] .text-white {
+  color: #ffffff !important;
+}

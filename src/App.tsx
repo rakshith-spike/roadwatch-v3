@@ -16,22 +16,18 @@ import { ContractorManagementPage } from './components/pages/ContractorManagemen
 import { BudgetPage } from './components/pages/BudgetPage';
 import { UserManagementPage } from './components/pages/UserManagementPage';
 import { WorkProgressPage } from './components/pages/WorkProgressPage';
+import {
+  AuditLogsPage,
+  HelpCenterPage,
+  NationalOverviewPage,
+  RegionsPage,
+  ReportsPage,
+  SettingsPage,
+  SystemHealthPage,
+  TransparencyPage
+} from './components/pages/PrototypePages';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './services/api';
-
-function PlaceholderPage({ title }: { title: string }) {
-  return (
-    <div className="min-h-[60vh] flex items-center justify-center">
-      <div className="text-center">
-        <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-primary-500/20 to-accent-500/20 flex items-center justify-center">
-          <span className="text-4xl">🚧</span>
-        </div>
-        <h2 className="text-2xl font-bold text-white mb-2">{title}</h2>
-        <p className="text-surface-400">This module is under development</p>
-      </div>
-    </div>
-  );
-}
 
 function DashboardContent() {
   const { user, currentView } = useStore();
@@ -55,14 +51,14 @@ function DashboardContent() {
       case 'work-progress': return <WorkProgressPage />;
       case 'budget':        return <BudgetPage />;
       case 'users':         return <UserManagementPage />;
-      case 'reports':       return <PlaceholderPage title="Reports & Documents" />;
-      case 'regions':       return <PlaceholderPage title="Region Configuration" />;
-      case 'national':      return <PlaceholderPage title="National Overview" />;
-      case 'transparency':  return <PlaceholderPage title="Transparency Portal" />;
-      case 'system':        return <PlaceholderPage title="System Health Monitor" />;
-      case 'audit':         return <PlaceholderPage title="Audit Logs" />;
-      case 'settings':      return <PlaceholderPage title="Settings" />;
-      case 'help':          return <PlaceholderPage title="Help Center" />;
+      case 'reports':       return <ReportsPage />;
+      case 'regions':       return <RegionsPage />;
+      case 'national':      return <NationalOverviewPage />;
+      case 'transparency':  return <TransparencyPage />;
+      case 'system':        return <SystemHealthPage />;
+      case 'audit':         return <AuditLogsPage />;
+      case 'settings':      return <SettingsPage />;
+      case 'help':          return <HelpCenterPage />;
       default:              return <CitizenDashboard />;
     }
   };

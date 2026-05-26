@@ -46,6 +46,11 @@ export function ProjectManagementPage() {
   const [newDesc, setNewDesc] = useState('');
   const [newContractor, setNewContractor] = useState('');
   const [newBudget, setNewBudget] = useState('');
+  const [newRoadType, setNewRoadType] = useState<'NH' | 'SH' | 'MDR' | 'ODR' | 'Urban Arterial' | 'Ward Road' | 'Expressway'>('MDR');
+  const [newLastRelayingDate, setNewLastRelayingDate] = useState('');
+  const [newAuthority, setNewAuthority] = useState('BBMP Road Infrastructure Division');
+  const [newEngineer, setNewEngineer] = useState('');
+  const [newBudgetSource, setNewBudgetSource] = useState('BBMP Ward Infrastructure Grant FY 2024-25');
   const [newStart, setNewStart] = useState('');
   const [newEnd, setNewEnd] = useState('');
   const [newAddress, setNewAddress] = useState('');
@@ -80,6 +85,12 @@ export function ProjectManagementPage() {
     const budget = parseInt(newBudget);
     addProject({
       id, title: newTitle, description: newDesc,
+      roadType: newRoadType,
+      lastRelayingDate: newLastRelayingDate || newStart || new Date().toISOString().split('T')[0],
+      responsibleAuthority: newAuthority,
+      executiveEngineer: newEngineer || 'Executive Engineer - Road Works',
+      budgetSource: newBudgetSource,
+      qualityScore: 70,
       contractor: newContractor, contractorName: contractor?.company,
       budget, spent: 0, startDate: newStart, endDate: newEnd,
       status: 'planned', progress: 0,
@@ -94,7 +105,9 @@ export function ProjectManagementPage() {
       requestedAt: new Date().toISOString().split('T')[0],
       approvedAt: new Date().toISOString().split('T')[0],
       approvedBy: user?.name,
-      district: newDistrict
+      district: newDistrict,
+      source: newBudgetSource,
+      sanctionReference: `RW/${newDistrict.replace(/\s+/g, '').toUpperCase()}/${String(Date.now()).slice(-5)}`
     });
     // mark complaints as assigned
     newComplaints.forEach(cid => {
@@ -102,6 +115,7 @@ export function ProjectManagementPage() {
     });
     setCreateModal(false);
     setNewTitle(''); setNewDesc(''); setNewContractor(''); setNewBudget('');
+    setNewRoadType('MDR'); setNewLastRelayingDate(''); setNewAuthority('BBMP Road Infrastructure Division'); setNewEngineer(''); setNewBudgetSource('BBMP Ward Infrastructure Grant FY 2024-25');
     setNewStart(''); setNewEnd(''); setNewAddress(''); setNewComplaints([]);
   }
 
@@ -213,12 +227,14 @@ export function ProjectManagementPage() {
                         <Badge variant={statusColor(project.status) as any} dot>
                           {statusLabel(project.status)}
                         </Badge>
+                        <Badge variant="outline">{project.roadType}</Badge>
                         {isOverdue && <Badge variant="danger" pulse dot>Overdue</Badge>}
                       </div>
                       <p className="text-sm text-surface-400 mb-3">{project.description}</p>
                       <div className="flex flex-wrap gap-4 text-sm text-surface-400">
                         <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" />{project.location.address}</span>
                         <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5" />{project.contractorName || contractor?.company}</span>
+                        <span className="flex items-center gap-1"><FileText className="w-3.5 h-3.5" />Last relayed: {project.lastRelayingDate}</span>
                         {project.endDate && (
                           <span className={`flex items-center gap-1 ${isOverdue ? 'text-danger-400' : daysLeft !== null && daysLeft <= 5 ? 'text-warning-400' : ''}`}>
                             <Calendar className="w-3.5 h-3.5" />
@@ -357,6 +373,28 @@ export function ProjectManagementPage() {
                               <p className="text-sm text-white">{project.approvedBy}</p>
                             </div>
                           )}
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-surface-800/50 rounded-lg p-3">
+                              <p className="text-xs text-surface-400">Road Type</p>
+                              <p className="text-sm text-white">{project.roadType}</p>
+                            </div>
+                            <div className="bg-surface-800/50 rounded-lg p-3">
+                              <p className="text-xs text-surface-400">Last Relaying Date</p>
+                              <p className="text-sm text-white">{project.lastRelayingDate}</p>
+                            </div>
+                            <div className="bg-surface-800/50 rounded-lg p-3">
+                              <p className="text-xs text-surface-400">Responsible Authority</p>
+                              <p className="text-sm text-white">{project.responsibleAuthority}</p>
+                            </div>
+                            <div className="bg-surface-800/50 rounded-lg p-3">
+                              <p className="text-xs text-surface-400">Executive Engineer</p>
+                              <p className="text-sm text-white">{project.executiveEngineer}</p>
+                            </div>
+                            <div className="bg-surface-800/50 rounded-lg p-3 col-span-2">
+                              <p className="text-xs text-surface-400">Budget Source</p>
+                              <p className="text-sm text-white">{project.budgetSource}</p>
+                            </div>
+                          </div>
                           {project.notes && (
                             <div className="bg-primary-500/10 border border-primary-500/20 rounded-lg p-3">
                               <p className="text-xs text-primary-400 mb-1">Notes</p>
@@ -382,10 +420,20 @@ export function ProjectManagementPage() {
           <Select label="Assign Contractor *" value={newContractor} onChange={e => setNewContractor(e.target.value)}
             options={[{ value: '', label: 'Select contractor…' }, ...contractors.filter(c => c.status === 'active').map(c => ({ value: c.id, label: `${c.company} — ${c.name}` }))]} />
           <div className="grid grid-cols-2 gap-4">
+            <Select label="Road Type *" value={newRoadType} onChange={e => setNewRoadType(e.target.value as any)}
+              options={['NH', 'SH', 'MDR', 'ODR', 'Urban Arterial', 'Ward Road', 'Expressway'].map(type => ({ value: type, label: type }))} />
+            <Input label="Last Relaying Date" type="date" value={newLastRelayingDate} onChange={e => setNewLastRelayingDate(e.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
             <Input label="Budget (₹) *" type="number" value={newBudget} onChange={e => setNewBudget(e.target.value)} placeholder="500000" />
             <Select label="District" value={newDistrict} onChange={e => setNewDistrict(e.target.value)}
               options={['Bangalore Urban', 'Bangalore Rural', 'Mysore', 'Hubli', 'Mangalore'].map(d => ({ value: d, label: d }))} />
           </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Responsible Authority *" value={newAuthority} onChange={e => setNewAuthority(e.target.value)} placeholder="BBMP / PWD / NHAI division" />
+            <Input label="Executive Engineer *" value={newEngineer} onChange={e => setNewEngineer(e.target.value)} placeholder="Er. Name, Zone" />
+          </div>
+          <Input label="Budget Source *" value={newBudgetSource} onChange={e => setNewBudgetSource(e.target.value)} placeholder="Scheme / grant / sanction source" />
           <div className="grid grid-cols-2 gap-4">
             <Input label="Start Date" type="date" value={newStart} onChange={e => setNewStart(e.target.value)} />
             <Input label="End Date" type="date" value={newEnd} onChange={e => setNewEnd(e.target.value)} />

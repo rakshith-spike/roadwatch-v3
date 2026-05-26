@@ -72,6 +72,12 @@ export function GovernmentDashboard() {
       id: projectId,
       title: `Repair: ${complaint?.title || 'Road Issue'}`,
       description: complaint?.description || '',
+      roadType: complaint?.location.address.includes('NH') ? 'NH' : 'Ward Road',
+      lastRelayingDate: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0],
+      responsibleAuthority: complaint?.category === 'streetlight' ? 'BBMP Electrical and Road Safety Cell' : complaint?.category === 'drainage' || complaint?.category === 'flooding' ? 'Stormwater Drainage Authority' : 'BBMP Road Infrastructure Division',
+      executiveEngineer: 'Executive Engineer - Road Works',
+      budgetSource: 'Emergency Road Maintenance Contingency Fund',
+      qualityScore: 65,
       contractor: assignContractor,
       contractorName: contractor?.company,
       budget: parseInt(assignBudget),
@@ -104,6 +110,8 @@ export function GovernmentDashboard() {
       approvedAt: new Date().toISOString().split('T')[0],
       approvedBy: user?.name,
       district: complaint?.location.district || 'Bangalore Urban',
+      source: 'Emergency Road Maintenance Contingency Fund',
+      sanctionReference: `RW/EMG/${String(Date.now()).slice(-5)}`,
     });
     updateComplaint(complaintId, { status: 'assigned', assignedTo: assignContractor });
     setAssignModal(null);

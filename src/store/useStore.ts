@@ -171,6 +171,7 @@ interface AppState {
   updateMilestone: (projectId: string, milestoneIndex: number, completed: boolean) => void;
 
   // Contractor actions
+  addContractor: (contractor: Contractor) => void;
   updateContractor: (id: string, updates: Partial<Contractor>) => void;
   suspendContractor: (id: string) => void;
   activateContractor: (id: string) => void;
@@ -373,7 +374,7 @@ const mockSystemUsers: SystemUser[] = [
 function getStoredSystemUsers(): SystemUser[] {
   if (typeof localStorage === 'undefined') return [];
   try {
-    const stored = localStorage.getItem('roadwatch_registered_users');
+    const stored = localStorage.getItem('roadwatch_system_users') || localStorage.getItem('roadwatch_registered_users');
     if (!stored) return [];
     return JSON.parse(stored) as SystemUser[];
   } catch {
@@ -381,11 +382,26 @@ function getStoredSystemUsers(): SystemUser[] {
   }
 }
 
-function persistRegisteredUsers(users: SystemUser[]) {
+function readStored<T>(key: string, fallback: T): T {
+  if (typeof localStorage === 'undefined') return fallback;
+  try {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) as T : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function persistStored<T>(key: string, value: T) {
   if (typeof localStorage === 'undefined') return;
-  const mockEmails = new Set(mockSystemUsers.map((user) => user.email.toLowerCase()));
-  const registeredOnly = users.filter((user) => !mockEmails.has(user.email.toLowerCase()));
-  localStorage.setItem('roadwatch_registered_users', JSON.stringify(registeredOnly));
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function mergeById<T extends { id: string }>(base: T[], stored: T[]): T[] {
+  const merged = new Map<string, T>();
+  base.forEach((item) => merged.set(item.id, item));
+  stored.forEach((item) => merged.set(item.id, item));
+  return Array.from(merged.values());
 }
 
 // ── Store ──────────────────────────────────────────────────────────────────────
@@ -393,16 +409,11 @@ function persistRegisteredUsers(users: SystemUser[]) {
 export const useStore = create<AppState>((set) => ({
   user: null,
   isAuthenticated: false,
-  complaints: mockComplaints,
-  contractors: mockContractors,
-  projects: mockProjects,
-  budgetEntries: mockBudgetEntries,
-  systemUsers: [
-    ...getStoredSystemUsers(),
-    ...mockSystemUsers.filter((mockUser) =>
-      !getStoredSystemUsers().some((storedUser) => storedUser.email.toLowerCase() === mockUser.email.toLowerCase())
-    )
-  ],
+  complaints: mergeById(mockComplaints, readStored<Complaint[]>('roadwatch_complaints', [])),
+  contractors: mergeById(mockContractors, readStored<Contractor[]>('roadwatch_contractors', [])),
+  projects: mergeById(mockProjects, readStored<Project[]>('roadwatch_projects', [])),
+  budgetEntries: mergeById(mockBudgetEntries, readStored<BudgetEntry[]>('roadwatch_budget_entries', [])),
+  systemUsers: mergeById(mockSystemUsers, getStoredSystemUsers()),
   sidebarOpen: true,
   currentView: 'dashboard',
   notifications: [
@@ -449,71 +460,131 @@ export const useStore = create<AppState>((set) => ({
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setCurrentView: (view) => set({ currentView: view }),
 
-  addComplaint: (complaint) => set((state) => ({ complaints: [complaint, ...state.complaints] })),
-  updateComplaint: (id, updates) => set((state) => ({
-    complaints: state.complaints.map((c) => c.id === id ? { ...c, ...updates } : c)
-  })),
+  addComplaint: (complaint) => set((state) => {
+    const complaints = [complaint, ...state.complaints];
+    persistStored('roadwatch_complaints', complaints);
+    return { complaints };
+  }),
+  updateComplaint: (id, updates) => set((state) => {
+    const complaints = state.complaints.map((c) => c.id === id ? { ...c, ...updates } : c);
+    persistStored('roadwatch_complaints', complaints);
+    return { complaints };
+  }),
   markNotificationRead: (id) => set((state) => ({
     notifications: state.notifications.map((n) => n.id === id ? { ...n, read: true } : n)
   })),
 
-  addProject: (project) => set((state) => ({ projects: [project, ...state.projects] })),
-  updateProject: (id, updates) => set((state) => ({
-    projects: state.projects.map((p) => p.id === id ? { ...p, ...updates } : p)
-  })),
-  addWorkLog: (projectId, log) => set((state) => ({
-    projects: state.projects.map((p) =>
+  addProject: (project) => set((state) => {
+    const projects = [project, ...state.projects];
+    persistStored('roadwatch_projects', projects);
+    return { projects };
+  }),
+  updateProject: (id, updates) => set((state) => {
+    const projects = state.projects.map((p) => p.id === id ? { ...p, ...updates } : p);
+    persistStored('roadwatch_projects', projects);
+    return { projects };
+  }),
+  addWorkLog: (projectId, log) => set((state) => {
+    const projects = state.projects.map((p) =>
       p.id === projectId ? { ...p, workLogs: [...(p.workLogs || []), log] } : p
-    )
-  })),
-  updateMilestone: (projectId, milestoneIndex, completed) => set((state) => ({
-    projects: state.projects.map((p) => {
+    );
+    persistStored('roadwatch_projects', projects);
+    return { projects };
+  }),
+  updateMilestone: (projectId, milestoneIndex, completed) => set((state) => {
+    const projects = state.projects.map((p) => {
       if (p.id !== projectId) return p;
       const milestones = [...p.milestones];
       milestones[milestoneIndex] = { ...milestones[milestoneIndex], completed };
       const completedCount = milestones.filter(m => m.completed).length;
       const progress = Math.round((completedCount / milestones.length) * 100);
       return { ...p, milestones, progress };
-    })
-  })),
+    });
+    persistStored('roadwatch_projects', projects);
+    return { projects };
+  }),
 
-  updateContractor: (id, updates) => set((state) => ({
-    contractors: state.contractors.map((c) => c.id === id ? { ...c, ...updates } : c)
-  })),
-  suspendContractor: (id) => set((state) => ({
-    contractors: state.contractors.map((c) => c.id === id ? { ...c, status: 'suspended' } : c)
-  })),
-  activateContractor: (id) => set((state) => ({
-    contractors: state.contractors.map((c) => c.id === id ? { ...c, status: 'active' } : c)
-  })),
+  addContractor: (contractor) => set((state) => {
+    const exists = state.contractors.some((existing) => existing.id === contractor.id || existing.email.toLowerCase() === contractor.email.toLowerCase());
+    const contractors = exists
+      ? state.contractors.map((existing) => existing.id === contractor.id || existing.email.toLowerCase() === contractor.email.toLowerCase() ? { ...existing, ...contractor } : existing)
+      : [contractor, ...state.contractors];
+    persistStored('roadwatch_contractors', contractors);
+    return { contractors };
+  }),
+  updateContractor: (id, updates) => set((state) => {
+    const contractors = state.contractors.map((c) => c.id === id ? { ...c, ...updates } : c);
+    persistStored('roadwatch_contractors', contractors);
+    return { contractors };
+  }),
+  suspendContractor: (id) => set((state) => {
+    const contractors = state.contractors.map((c) => c.id === id ? { ...c, status: 'suspended' as const } : c);
+    persistStored('roadwatch_contractors', contractors);
+    return { contractors };
+  }),
+  activateContractor: (id) => set((state) => {
+    const contractors = state.contractors.map((c) => c.id === id ? { ...c, status: 'active' as const } : c);
+    persistStored('roadwatch_contractors', contractors);
+    return { contractors };
+  }),
 
-  addBudgetEntry: (entry) => set((state) => ({ budgetEntries: [entry, ...state.budgetEntries] })),
-  updateBudgetEntry: (id, updates) => set((state) => ({
-    budgetEntries: state.budgetEntries.map((b) => b.id === id ? { ...b, ...updates } : b)
-  })),
-  approveBudget: (id, approverName) => set((state) => ({
-    budgetEntries: state.budgetEntries.map((b) =>
-      b.id === id ? { ...b, status: 'approved', approvedBy: approverName, approvedAt: new Date().toISOString().split('T')[0] } : b
-    )
-  })),
-  rejectBudget: (id, notes) => set((state) => ({
-    budgetEntries: state.budgetEntries.map((b) =>
+  addBudgetEntry: (entry) => set((state) => {
+    const budgetEntries = [entry, ...state.budgetEntries];
+    persistStored('roadwatch_budget_entries', budgetEntries);
+    return { budgetEntries };
+  }),
+  updateBudgetEntry: (id, updates) => set((state) => {
+    const budgetEntries = state.budgetEntries.map((b) => b.id === id ? { ...b, ...updates } : b);
+    persistStored('roadwatch_budget_entries', budgetEntries);
+    return { budgetEntries };
+  }),
+  approveBudget: (id, approverName) => set((state) => {
+    const approvedAt = new Date().toISOString().split('T')[0];
+    const entry = state.budgetEntries.find((b) => b.id === id);
+    const budgetEntries = state.budgetEntries.map((b) =>
+      b.id === id ? { ...b, status: 'approved' as const, approvedBy: approverName, approvedAt } : b
+    );
+    const projects = entry
+      ? state.projects.map((project) => {
+          if (project.id !== entry.projectId) return project;
+          if (entry.type === 'request' || entry.type === 'revision') {
+            return { ...project, budget: project.budget + entry.amount };
+          }
+          if (entry.type === 'disbursement') {
+            return { ...project, spent: Math.min(project.budget, project.spent + entry.amount) };
+          }
+          return project;
+        })
+      : state.projects;
+    persistStored('roadwatch_budget_entries', budgetEntries);
+    persistStored('roadwatch_projects', projects);
+    return { budgetEntries, projects };
+  }),
+  rejectBudget: (id, notes) => set((state) => {
+    const budgetEntries = state.budgetEntries.map((b) =>
       b.id === id ? { ...b, status: 'rejected', notes } : b
-    )
-  })),
+    );
+    persistStored('roadwatch_budget_entries', budgetEntries);
+    return { budgetEntries };
+  }),
 
-  updateSystemUser: (id, updates) => set((state) => ({
-    systemUsers: state.systemUsers.map((u) => u.id === id ? { ...u, ...updates } : u)
-  })),
-  toggleUserStatus: (id) => set((state) => ({
-    systemUsers: state.systemUsers.map((u) => u.id === id ? { ...u, isActive: !u.isActive } : u)
-  })),
+  updateSystemUser: (id, updates) => set((state) => {
+    const systemUsers = state.systemUsers.map((u) => u.id === id ? { ...u, ...updates } : u);
+    persistStored('roadwatch_system_users', systemUsers);
+    return { systemUsers };
+  }),
+  toggleUserStatus: (id) => set((state) => {
+    const systemUsers = state.systemUsers.map((u) => u.id === id ? { ...u, isActive: !u.isActive } : u);
+    persistStored('roadwatch_system_users', systemUsers);
+    return { systemUsers };
+  }),
   addSystemUser: (user) => set((state) => {
     const exists = state.systemUsers.some((existing) => existing.email.toLowerCase() === user.email.toLowerCase());
     const systemUsers = exists
       ? state.systemUsers.map((existing) => existing.email.toLowerCase() === user.email.toLowerCase() ? { ...existing, ...user } : existing)
       : [user, ...state.systemUsers];
-    persistRegisteredUsers(systemUsers);
+    persistStored('roadwatch_system_users', systemUsers);
+    if (typeof localStorage !== 'undefined') localStorage.removeItem('roadwatch_registered_users');
     return { systemUsers };
   }),
 }));

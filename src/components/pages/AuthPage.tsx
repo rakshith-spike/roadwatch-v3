@@ -63,7 +63,7 @@ const DEMO_USERS: Record<string, { id: string; name: string; email: string; role
 interface FormError { [key: string]: string }
 
 export function AuthPage() {
-  const { setUser, addSystemUser } = useStore();
+  const { setUser, addSystemUser, addContractor } = useStore();
   const [mode, setMode] = useState<'landing'|'login'|'register'>('landing');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -135,6 +135,49 @@ export function AuthPage() {
     return Object.keys(errs).length === 0;
   }
 
+  function upsertUserDirectory(user: {
+    id: string;
+    name: string;
+    email: string;
+    role: UserRole;
+    district?: string;
+    state?: string;
+    phone?: string;
+  }) {
+    const today = new Date().toISOString().split('T')[0];
+    addSystemUser({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      district: user.district,
+      state: user.state,
+      isActive: true,
+      createdAt: today,
+      lastLogin: today
+    });
+
+    if (user.role === 'contractor') {
+      addContractor({
+        id: user.id,
+        name: user.name,
+        company: `${user.name} Infrastructure`,
+        license: `PENDING-${String(Date.now()).slice(-6)}`,
+        email: user.email,
+        phone: user.phone || 'Not provided',
+        rating: 0,
+        completedProjects: 0,
+        activeProjects: 0,
+        totalBudget: 0,
+        regions: [user.district || 'Bangalore Urban'],
+        specialization: ['Road Repair'],
+        performanceScore: 0,
+        status: 'pending',
+        joinedAt: today
+      });
+    }
+  }
+
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setError('');
@@ -142,14 +185,16 @@ export function AuthPage() {
     setLoading(true);
     try {
       const res = await api.login(loginEmail, loginPassword);
-      setUser({
+      const loggedInUser = {
         id: res.user._id || res.user.id,
         name: res.user.name,
         email: res.user.email,
         role: res.user.role as UserRole,
         district: res.user.district,
         state: res.user.state,
-      });
+      };
+      upsertUserDirectory(loggedInUser);
+      setUser(loggedInUser);
     } catch (err: any) {
       const demoUser = DEMO_USERS[loginEmail.toLowerCase()];
       if (demoUser && loginPassword === 'demo123') {
@@ -201,17 +246,7 @@ export function AuthPage() {
         };
       }
 
-      addSystemUser({
-        id: registeredUser.id,
-        name: registeredUser.name,
-        email: registeredUser.email,
-        role: registeredUser.role,
-        district: registeredUser.district,
-        state: registeredUser.state,
-        isActive: true,
-        createdAt: new Date().toISOString().split('T')[0],
-        lastLogin: new Date().toISOString().split('T')[0]
-      });
+      upsertUserDirectory(registeredUser);
       setSuccess('Account created successfully!');
       setTimeout(() => {
         setUser(registeredUser);

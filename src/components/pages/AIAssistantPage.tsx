@@ -62,7 +62,7 @@ const queryStopWords = new Set([
 function queryTokens(query: string) {
   return normalize(query)
     .split(' ')
-    .filter((word) => word.length > 2 && !queryStopWords.has(word));
+    .filter((word) => word.length > 1 && !queryStopWords.has(word));
 }
 
 export function AIAssistantPage() {
@@ -88,13 +88,14 @@ export function AIAssistantPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = () => {
-    if (!inputValue.trim()) return;
+  const handleSend = (override?: string) => {
+    const outgoing = (override ?? inputValue).trim();
+    if (!outgoing) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: inputValue,
+      content: outgoing,
       timestamp: new Date()
     };
 
@@ -104,7 +105,7 @@ export function AIAssistantPage() {
 
     // Simulate AI response
     setTimeout(() => {
-      const responses = getAIResponse(inputValue);
+      const responses = getAIResponse(outgoing);
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -339,6 +340,7 @@ export function AIAssistantPage() {
 
   const handlePromptClick = (prompt: string) => {
     setInputValue(prompt);
+    handleSend(prompt);
   };
 
   const handleAction = (label: string) => {
@@ -484,14 +486,14 @@ export function AIAssistantPage() {
                 type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                 placeholder="Ask me anything about road infrastructure..."
                 className="flex-1 bg-surface-800/50 border border-surface-700 rounded-xl px-4 py-3 text-white placeholder-surface-500 focus:outline-none focus:border-primary-500 transition-colors"
               />
               <button className="p-2 text-surface-400 hover:text-white hover:bg-surface-800 rounded-lg transition-colors">
                 <Mic className="w-5 h-5" />
               </button>
-              <Button onClick={handleSend} disabled={!inputValue.trim()}>
+              <Button onClick={() => handleSend()} disabled={!inputValue.trim()}>
                 <Send className="w-4 h-4" />
               </Button>
             </div>

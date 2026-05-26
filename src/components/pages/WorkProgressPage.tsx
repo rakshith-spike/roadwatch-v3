@@ -52,6 +52,18 @@ export function WorkProgressPage() {
     setWorkLogModal(null); setWlDesc(''); setWlWorkers(''); setWlMaterials('');
   }
 
+  function handleMarkComplete(projectId: string) {
+    const project = projects.find(p => p.id === projectId);
+    if (!project) return;
+    updateProject(projectId, {
+      progress: 100,
+      status: 'completed',
+      spent: project.budget,
+      milestones: project.milestones.map((milestone) => ({ ...milestone, completed: true })),
+      notes: `${project.notes ? `${project.notes}\n` : ''}Contractor marked work completed with final progress update.`
+    } as any);
+  }
+
   function getStatusColor(status: string) {
     switch (status) {
       case 'in_progress': return 'info';
@@ -217,10 +229,16 @@ export function WorkProgressPage() {
                       </div>
                       <div className="flex flex-col gap-2">
                         {isContractor && project.status === 'in_progress' && (
-                          <Button variant="outline" size="sm" icon={<Camera className="w-3.5 h-3.5" />}
-                            onClick={() => { setWorkLogModal(project.id); setWlDesc(''); setWlWorkers(''); setWlMaterials(''); }}>
-                            Log Work
-                          </Button>
+                          <>
+                            <Button variant="outline" size="sm" icon={<Camera className="w-3.5 h-3.5" />}
+                              onClick={() => { setWorkLogModal(project.id); setWlDesc(''); setWlWorkers(''); setWlMaterials(''); }}>
+                              Log Work
+                            </Button>
+                            <Button variant="secondary" size="sm" icon={<CheckCircle className="w-3.5 h-3.5" />}
+                              onClick={() => handleMarkComplete(project.id)}>
+                              Complete
+                            </Button>
+                          </>
                         )}
                         <button onClick={() => setExpandedId(isExpanded ? null : project.id)}
                           className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1">

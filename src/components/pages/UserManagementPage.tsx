@@ -26,7 +26,7 @@ const roleLabels: Record<string, string> = {
 };
 
 export function UserManagementPage() {
-  const { systemUsers, user, toggleUserStatus, updateSystemUser, addSystemUser } = useStore();
+  const { systemUsers, user, toggleUserStatus, updateSystemUser, addSystemUser, addContractor } = useStore();
   const [search, setSearch] = useState('');
   const [filterRole, setFilterRole] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -62,16 +62,37 @@ export function UserManagementPage() {
 
   function handleAddUser() {
     if (!newName || !newEmail) return;
+    const id = `u${Date.now()}`;
+    const today = new Date().toISOString().split('T')[0];
     addSystemUser({
-      id: `u${Date.now()}`,
+      id,
       name: newName,
       email: newEmail,
       role: newRole,
       district: newDistrict,
       state: newState,
       isActive: true,
-      createdAt: new Date().toISOString().split('T')[0]
+      createdAt: today
     });
+    if (newRole === 'contractor') {
+      addContractor({
+        id,
+        name: newName,
+        company: `${newName} Infrastructure`,
+        license: `PENDING-${String(Date.now()).slice(-6)}`,
+        email: newEmail,
+        phone: 'Not provided',
+        rating: 0,
+        completedProjects: 0,
+        activeProjects: 0,
+        totalBudget: 0,
+        regions: [newDistrict || 'Bangalore Urban'],
+        specialization: ['Road Repair'],
+        performanceScore: 0,
+        status: 'pending',
+        joinedAt: today
+      });
+    }
     setAddModal(false);
     setNewName(''); setNewEmail(''); setNewRole('citizen'); setNewDistrict('');
   }

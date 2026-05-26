@@ -104,7 +104,7 @@ function getRoutingAuthority(category: string, severity: string) {
 }
 
 export function ComplaintsPage() {
-  const { complaints, user, addComplaint } = useStore();
+  const { complaints, contractors, user, addComplaint, updateComplaint, addProject, addBudgetEntry } = useStore();
   const [showNewComplaint, setShowNewComplaint] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -216,6 +216,91 @@ export function ComplaintsPage() {
   };
 
   const isGovernmentOrAdmin = user?.role === 'government' || user?.role === 'superadmin';
+
+  function findBestContractor(category: string) {
+    const specializationByCategory: Record<string, string[]> = {
+      pothole: ['Road Repair', 'Road Construction'],
+      crack: ['Road Repair', 'Road Construction'],
+      flooding: ['Drainage Systems', 'Road Repair'],
+      drainage: ['Drainage Systems'],
+      streetlight: ['Street Lighting'],
+      debris: ['Road Repair']
+    };
+    const desired = specializationByCategory[category] || ['Road Repair'];
+    return contractors
+      .filter((contractor) => contractor.status === 'active')
+      .sort((a, b) => {
+        const aMatch = a.specialization.some((item) => desired.includes(item)) ? 1 : 0;
+        const bMatch = b.specialization.some((item) => desired.includes(item)) ? 1 : 0;
+        return bMatch - aMatch || b.performanceScore - a.performanceScore;
+      })[0];
+  }
+
+  function handleVerifyComplaint(id: string) {
+    updateComplaint(id, { status: 'verified' });
+  }
+
+  function handleRejectComplaint(id: string) {
+    updateComplaint(id, { status: 'rejected' });
+  }
+
+  function handleAssignComplaint(id: string) {
+    const complaint = complaints.find((item) => item.id === id);
+    if (!complaint) return;
+    const contractor = findBestContractor(complaint.category);
+    if (!contractor) return;
+    const budget = complaint.aiAnalysis?.estimatedCost || 50000;
+    const projectId = `P${String(Date.now()).slice(-5)}`;
+    const source = complaint.severity === 'critical'
+      ? 'Emergency Road Maintenance Contingency Fund'
+      : 'Ward Infrastructure Maintenance Fund';
+    addProject({
+      id: projectId,
+      title: `Repair: ${complaint.title}`,
+      description: complaint.description,
+      roadType: complaint.location.address.includes('NH') ? 'NH' : complaint.location.address.includes('SH') ? 'SH' : 'Ward Road',
+      lastRelayingDate: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0],
+      responsibleAuthority: getRoutingAuthority(complaint.category, complaint.severity),
+      executiveEngineer: complaint.severity === 'critical' ? 'Executive Engineer - Emergency Road Works' : 'Executive Engineer - Road Works',
+      budgetSource: source,
+      qualityScore: complaint.severity === 'critical' ? 45 : 65,
+      contractor: contractor.id,
+      contractorName: contractor.company,
+      budget,
+      spent: 0,
+      startDate: new Date().toISOString().split('T')[0],
+      endDate: new Date(Date.now() + (complaint.severity === 'critical' ? 2 : 7) * 86400000).toISOString().split('T')[0],
+      status: 'planned',
+      progress: 0,
+      location: complaint.location,
+      complaints: [complaint.id],
+      milestones: [
+        { title: 'Site Inspection', completed: false, date: new Date().toISOString().split('T')[0] },
+        { title: 'Material Procurement', completed: false, date: new Date(Date.now() + 86400000).toISOString().split('T')[0] },
+        { title: 'Repair Work', completed: false, date: new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0] },
+        { title: 'Quality Check', completed: false, date: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0] }
+      ],
+      workLogs: [],
+      approvedBy: user?.name,
+      notes: `Auto-created from complaint ${complaint.id}`
+    });
+    addBudgetEntry({
+      id: `B${Date.now()}`,
+      projectId,
+      projectTitle: `Repair: ${complaint.title}`,
+      contractor: contractor.company,
+      amount: budget,
+      type: 'allocation',
+      status: 'approved',
+      requestedAt: new Date().toISOString().split('T')[0],
+      approvedAt: new Date().toISOString().split('T')[0],
+      approvedBy: user?.name,
+      district: complaint.location.district,
+      source,
+      sanctionReference: `RW/AUTO/${String(Date.now()).slice(-5)}`
+    });
+    updateComplaint(id, { status: 'assigned', assignedTo: contractor.id });
+  }
 
   return (
     <div className="space-y-6">
@@ -340,12 +425,12 @@ export function ComplaintsPage() {
                     
                     {isGovernmentOrAdmin && complaint.status === 'pending' && (
                       <div className="flex gap-2">
-                        <Button size="sm" variant="outline">Reject</Button>
-                        <Button size="sm">Verify</Button>
+                        <Button size="sm" variant="outline" onClick={() => handleRejectComplaint(complaint.id)}>Reject</Button>
+                        <Button size="sm" onClick={() => handleVerifyComplaint(complaint.id)}>Verify</Button>
                       </div>
                     )}
                     {isGovernmentOrAdmin && complaint.status === 'verified' && (
-                      <Button size="sm">Assign Contractor</Button>
+                      <Button size="sm" onClick={() => handleAssignComplaint(complaint.id)}>Assign Contractor</Button>
                     )}
                     
                     <ChevronRight className="w-5 h-5 text-surface-500" />

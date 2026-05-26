@@ -13,7 +13,7 @@ import { Modal } from '../ui/Modal';
 import { useStore } from '../../store/useStore';
 
 export function ContractorManagementPage() {
-  const { contractors, projects, suspendContractor, activateContractor, user } = useStore();
+  const { contractors, projects, suspendContractor, activateContractor, updateSystemUser, user } = useStore();
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterSpec, setFilterSpec] = useState('all');
@@ -28,7 +28,8 @@ export function ContractorManagementPage() {
     if (filterSpec !== 'all' && !c.specialization.includes(filterSpec)) return false;
     if (search && !c.name.toLowerCase().includes(search.toLowerCase()) &&
         !c.company.toLowerCase().includes(search.toLowerCase()) &&
-        !c.license.toLowerCase().includes(search.toLowerCase())) return false;
+        !c.license.toLowerCase().includes(search.toLowerCase()) &&
+        !c.email.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
@@ -50,6 +51,16 @@ export function ContractorManagementPage() {
     if (s >= 85) return 'success';
     if (s >= 70) return 'warning';
     return 'danger';
+  }
+
+  function suspendAndReflect(id: string) {
+    suspendContractor(id);
+    updateSystemUser(id, { isActive: false });
+  }
+
+  function activateAndReflect(id: string) {
+    activateContractor(id);
+    updateSystemUser(id, { isActive: true });
   }
 
   return (
@@ -185,9 +196,9 @@ export function ContractorManagementPage() {
                     {isSuperAdmin && (
                       contractor.status === 'active'
                         ? <Button variant="danger" size="sm" icon={<XCircle className="w-3.5 h-3.5" />}
-                            onClick={() => suspendContractor(contractor.id)}>Suspend</Button>
+                            onClick={() => suspendAndReflect(contractor.id)}>Suspend</Button>
                         : <Button variant="secondary" size="sm" icon={<CheckCircle className="w-3.5 h-3.5" />}
-                            onClick={() => activateContractor(contractor.id)}>Activate</Button>
+                            onClick={() => activateAndReflect(contractor.id)}>{contractor.status === 'pending' ? 'Accept' : 'Activate'}</Button>
                     )}
                   </div>
                 </div>
@@ -279,12 +290,12 @@ export function ContractorManagementPage() {
               <div className="flex gap-3 pt-2 border-t border-surface-700">
                 {selected.status === 'active'
                   ? <Button variant="danger" icon={<XCircle className="w-4 h-4" />}
-                      onClick={() => { suspendContractor(selected.id); setSelectedContractor(null); }}>
+                      onClick={() => { suspendAndReflect(selected.id); setSelectedContractor(null); }}>
                       Suspend Contractor
                     </Button>
                   : <Button variant="secondary" icon={<CheckCircle className="w-4 h-4" />}
-                      onClick={() => { activateContractor(selected.id); setSelectedContractor(null); }}>
-                      Reactivate Contractor
+                      onClick={() => { activateAndReflect(selected.id); setSelectedContractor(null); }}>
+                      {selected.status === 'pending' ? 'Accept Contractor' : 'Reactivate Contractor'}
                     </Button>
                 }
               </div>

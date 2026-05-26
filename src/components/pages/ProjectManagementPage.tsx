@@ -141,6 +141,18 @@ export function ProjectManagementPage() {
     setProgressModal(null);
   }
 
+  function handleMarkComplete(projectId: string) {
+    const project = projects.find(pr => pr.id === projectId);
+    if (!project) return;
+    updateProject(projectId, {
+      progress: 100,
+      status: 'completed',
+      spent: project.budget,
+      milestones: project.milestones.map((milestone) => ({ ...milestone, completed: true })),
+      notes: `${project.notes ? `${project.notes}\n` : ''}Completed and ready for final quality verification.`
+    } as any);
+  }
+
   const unverifiedComplaints = complaints.filter(c => c.status === 'verified' || c.status === 'pending');
 
   return (
@@ -298,10 +310,18 @@ export function ProjectManagementPage() {
                       </>
                     )}
                     {isGovOrAdmin && (
-                      <Button variant="ghost" size="sm" icon={<Edit2 className="w-3.5 h-3.5" />}
-                        onClick={() => { setProgressModal(project.id); setNewProgress(String(project.progress)); setNewProjectStatus(project.status); }}>
-                        Update Status
-                      </Button>
+                      <>
+                        <Button variant="ghost" size="sm" icon={<Edit2 className="w-3.5 h-3.5" />}
+                          onClick={() => { setProgressModal(project.id); setNewProgress(String(project.progress)); setNewProjectStatus(project.status); }}>
+                          Update Status
+                        </Button>
+                        {project.status !== 'completed' && (
+                          <Button variant="secondary" size="sm" icon={<CheckCircle className="w-3.5 h-3.5" />}
+                            onClick={() => handleMarkComplete(project.id)}>
+                            Mark Complete
+                          </Button>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>

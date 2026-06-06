@@ -66,6 +66,8 @@ export function StatusBadge({ status }: { status: string }) {
     assigned: { variant: 'info', label: 'Assigned' },
     in_progress: { variant: 'warning', label: 'In Progress' },
     resolved: { variant: 'success', label: 'Resolved' },
+    validation_pending: { variant: 'info', label: 'Verification Requested' },
+    closed: { variant: 'success', label: 'Closed' },
     rejected: { variant: 'danger', label: 'Rejected' },
     completed: { variant: 'success', label: 'Completed' },
     delayed: { variant: 'danger', label: 'Delayed' },

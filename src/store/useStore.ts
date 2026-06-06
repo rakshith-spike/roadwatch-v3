@@ -23,7 +23,7 @@ export interface Complaint {
   description: string;
   category: 'pothole' | 'crack' | 'flooding' | 'debris' | 'streetlight' | 'drainage' | 'other';
   severity: 'low' | 'medium' | 'high' | 'critical';
-  status: 'pending' | 'verified' | 'assigned' | 'in_progress' | 'resolved' | 'rejected';
+  status: 'pending' | 'verified' | 'assigned' | 'in_progress' | 'resolved' | 'rejected' | 'validation_pending' | 'closed';
   location: {
     lat: number;
     lng: number;
@@ -42,8 +42,45 @@ export interface Complaint {
     estimatedCost: number;
     priority: number;
     duplicateOf?: string;
+    issueType?: string;
+    confidence?: number;
+    severityScore?: number;
+    boundingBoxes?: { label: string; confidence: number; box: number[]; areaRatio?: number }[];
+    annotatedImage?: string;
+    estimatedDays?: number;
+    priorityScore?: number;
+    trafficImportance?: number;
+    costRange?: number[];
+    costReasoning?: string;
+    modelStatus?: string;
   };
   votes: number;
+  supportCount?: number;
+  supportedBy?: string[];
+  duplicateOf?: string;
+  estimatedCost?: number;
+  costRange?: number[];
+  costReasoning?: string;
+  estimatedDays?: number;
+  priorityScore?: number;
+  severityScore?: number;
+  trafficImportance?: number;
+  annotatedImage?: string;
+  progressPercentage?: number;
+  beforeWorkPhotos?: string[];
+  progressPhotos?: string[];
+  completionPhotos?: string[];
+  workNotes?: string;
+  repairValidation?: {
+    repairConfidence: number;
+    status: 'verified' | 'needs_review';
+    reasoning?: string;
+  };
+  citizenVerification?: {
+    fixed: boolean;
+    notes?: string;
+    verifiedAt?: string;
+  };
   comments: number;
 }
 

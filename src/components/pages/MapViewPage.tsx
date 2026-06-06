@@ -131,12 +131,38 @@ const categoryIcon: Record<string, string> = {
   pothole: '🕳️', crack: '⚡', drainage: '💧', streetlight: '💡', debris: '🪨', flooding: '🌊', other: '⚠️'
 };
 
+function buildClusters(complaints: Complaint[], precision = 2) {
+  const buckets = new Map<string, { items: Complaint[]; lat: number; lng: number }>();
+  complaints.forEach((complaint) => {
+    const key = `${complaint.location.lat.toFixed(precision)}:${complaint.location.lng.toFixed(precision)}`;
+    const bucket = buckets.get(key) || { items: [], lat: 0, lng: 0 };
+    bucket.items.push(complaint);
+    bucket.lat += complaint.location.lat;
+    bucket.lng += complaint.location.lng;
+    buckets.set(key, bucket);
+  });
+  return Array.from(buckets.entries()).map(([id, bucket]) => {
+    const count = bucket.items.length;
+    const priority = Math.round(bucket.items.reduce((sum, item) => sum + (item.priorityScore || item.aiAnalysis?.priority || 50), 0) / count);
+    const critical = bucket.items.filter(item => item.severity === 'critical').length;
+    return {
+      id,
+      items: bucket.items,
+      lat: bucket.lat / count,
+      lng: bucket.lng / count,
+      count,
+      priority,
+      critical,
+      severity: critical ? 'critical' : priority >= 75 ? 'high' : 'medium'
+    };
+  });
+}
+
 function LeafletMap({ complaints, selectedId, onSelect, activeLayer }:
   { complaints: Complaint[]; selectedId: string|null; onSelect:(id:string|null)=>void; activeLayer:string }) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<any>(null);
   const markers = useRef<Record<string, any>>({});
-  const heatLayer = useRef<any>(null);
   const tileLayer = useRef<any>(null);
 
   useEffect(() => {
@@ -149,37 +175,72 @@ function LeafletMap({ complaints, selectedId, onSelect, activeLayer }:
         attribution: '© OpenStreetMap', maxZoom: 19,
       }).addTo(map);
       mapInstance.current = map;
+    });
+    return () => { mapInstance.current?.remove(); mapInstance.current = null; markers.current = {}; };
+  }, []);
 
-      complaints.forEach(c => {
-        const color = severityColor(c.severity);
-        const icon = L.divIcon({
-          className: '',
-          html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);cursor:pointer;"></div>`,
-          iconSize:[14,14], iconAnchor:[7,7],
+  useEffect(() => {
+    if (!mapInstance.current) return;
+    import('leaflet').then(L => {
+      Object.values(markers.current).forEach((marker) => marker.remove());
+      markers.current = {};
+      const map = mapInstance.current;
+
+      if (activeLayer === 'heatmap') {
+        buildClusters(complaints, 2).forEach((cluster) => {
+          const radius = Math.min(62, 18 + cluster.count * 4 + cluster.priority / 4);
+          const circle = L.circleMarker([cluster.lat, cluster.lng], {
+            radius,
+            fillColor: severityColor(cluster.severity),
+            color: severityColor(cluster.severity),
+            weight: 1,
+            opacity: 0.55,
+            fillOpacity: 0.25,
+          }).addTo(map);
+          circle.bindTooltip(`${cluster.count} issues • priority ${cluster.priority}/100`, { direction:'top' });
+          markers.current[cluster.id] = circle;
         });
-        const m = L.marker([c.location.lat, c.location.lng], { icon })
-          .addTo(map)
-          .on('click', () => onSelect(selectedId === c.id ? null : c.id));
-        m.bindTooltip(`${categoryIcon[c.category]||'⚠️'} ${c.title}`, { direction:'top', offset:[0,-8] });
-        markers.current[c.id] = m;
-      });
+      } else {
+        const clustered = activeLayer === 'complaints' || activeLayer === 'projects'
+          ? buildClusters(complaints, 2)
+          : complaints.map(c => ({ id: c.id, items: [c], lat: c.location.lat, lng: c.location.lng, count: 1, priority: c.priorityScore || c.aiAnalysis?.priority || 50, critical: c.severity === 'critical' ? 1 : 0, severity: c.severity }));
+        clustered.forEach((cluster) => {
+          const single = cluster.items[0];
+          const color = severityColor(cluster.severity);
+          const size = cluster.count > 1 ? Math.min(44, 24 + cluster.count * 2) : 14;
+          const icon = L.divIcon({
+            className: '',
+            html: cluster.count > 1
+              ? `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 3px 12px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;color:white;font-size:12px;font-weight:700;cursor:pointer;">${cluster.count}</div>`
+              : `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,0.4);cursor:pointer;"></div>`,
+            iconSize:[size,size], iconAnchor:[size/2,size/2],
+          });
+          const marker = L.marker([cluster.lat, cluster.lng], { icon })
+            .addTo(map)
+            .on('click', () => onSelect(single.id));
+          marker.bindTooltip(
+            cluster.count > 1
+              ? `${cluster.count} complaints • top: ${single.title}`
+              : `${categoryIcon[single.category]||'⚠️'} ${single.title}`,
+            { direction:'top', offset:[0,-8] }
+          );
+          markers.current[cluster.id] = marker;
+        });
+      }
 
-      if (complaints.length > 0) {
+      if (complaints.length > 0 && Object.values(markers.current).length > 0) {
         const group = L.featureGroup(Object.values(markers.current));
         map.fitBounds(group.getBounds().pad(0.08));
       }
     });
-    return () => { mapInstance.current?.remove(); mapInstance.current = null; markers.current = {}; };
-  // eslint-disable-next-line
-  }, []);
+  }, [complaints, activeLayer, onSelect]);
 
-  // Update selected marker
   useEffect(() => {
-    if (!mapInstance.current) return;
+    if (!mapInstance.current || !selectedId) return;
     import('leaflet').then(L => {
-      Object.entries(markers.current).forEach(([id, m]) => {
+      Object.entries(markers.current).forEach(([id, marker]) => {
         const c = complaints.find(x => x.id === id);
-        if (!c) return;
+        if (!c || !marker.setIcon) return;
         const color = severityColor(c.severity);
         const sel = id === selectedId;
         const icon = L.divIcon({
@@ -187,7 +248,7 @@ function LeafletMap({ complaints, selectedId, onSelect, activeLayer }:
           html: `<div style="width:${sel?22:14}px;height:${sel?22:14}px;border-radius:50%;background:${color};border:${sel?3:2}px solid white;box-shadow:0 2px ${sel?12:6}px rgba(0,0,0,${sel?0.7:0.4});cursor:pointer;transition:all .2s;${sel?'outline:3px solid '+color+';outline-offset:3px;':''}">${sel?`<span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:9px;color:white;font-weight:bold">${categoryIcon[c.category]||'!'}</span>`:''}</div>`,
           iconSize:[sel?22:14,sel?22:14], iconAnchor:[sel?11:7,sel?11:7],
         });
-        m.setIcon(icon);
+        marker.setIcon(icon);
         if (sel) mapInstance.current.setView([c.location.lat, c.location.lng], 15, { animate: true });
       });
     });
@@ -209,14 +270,23 @@ export function MapViewPage() {
   const [search, setSearch] = useState('');
   const [showFilters, setShowFilters] = useState(false);
 
-  const filtered = useMemo(() => allComplaints.filter(c => {
+  const scopedComplaints = useMemo(() => {
+    if (user?.role !== 'citizen') return allComplaints;
+    const source = storeComplaints.length ? storeComplaints : allComplaints;
+    const center = source[0]?.location || { lat: 12.9716, lng: 77.5946 };
+    return allComplaints
+      .filter(c => Math.abs(c.location.lat - center.lat) < 0.06 && Math.abs(c.location.lng - center.lng) < 0.06)
+      .slice(0, 40);
+  }, [allComplaints, storeComplaints, user?.role]);
+
+  const filtered = useMemo(() => scopedComplaints.filter(c => {
     if (severityFilter !== 'all' && c.severity !== severityFilter) return false;
     if (categoryFilter !== 'all' && c.category !== categoryFilter) return false;
     if (statusFilter !== 'all' && c.status !== statusFilter) return false;
     if (search && !c.title.toLowerCase().includes(search.toLowerCase()) &&
         !c.location.address.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
-  }), [allComplaints, severityFilter, categoryFilter, statusFilter, search]);
+  }), [scopedComplaints, severityFilter, categoryFilter, statusFilter, search]);
 
   const selected = allComplaints.find(c => c.id === selectedId);
 
@@ -230,7 +300,7 @@ export function MapViewPage() {
   ];
 
   const layers = [
-    { id:'complaints', label:'All Complaints', icon:AlertCircle, count: allComplaints.length },
+    { id:'complaints', label:isGov ? 'Complaint Clusters' : 'Nearby Issues', icon:AlertCircle, count: scopedComplaints.length },
     { id:'heatmap',    label:'Hotspot Heatmap', icon:Thermometer, count: null },
     { id:'projects',   label:'Active Projects',  icon:Construction, count: storeComplaints.filter(c=>c.status==='in_progress').length },
     { id:'flooding',   label:'Flood Zones',      icon:Droplets, count: allComplaints.filter(c=>c.category==='flooding').length },

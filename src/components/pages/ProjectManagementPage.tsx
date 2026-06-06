@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Search, Filter, Calendar, MapPin, Wallet, TrendingUp,
@@ -11,7 +11,9 @@ import { Badge, StatusBadge } from '../ui/Badge';
 import { Progress } from '../ui/Progress';
 import { Modal } from '../ui/Modal';
 import { Input, Textarea, Select } from '../ui/Input';
-import { useStore } from '../../store/useStore';
+import { useStore, Project } from '../../store/useStore';
+import { api } from '../../services/api';
+import { mapApiProject } from '../../utils/projectMapper';
 
 function statusColor(status: string) {
   switch (status) {
@@ -35,6 +37,7 @@ export function ProjectManagementPage() {
   const [createModal, setCreateModal] = useState(false);
   const [workLogModal, setWorkLogModal] = useState<string | null>(null);
   const [progressModal, setProgressModal] = useState<string | null>(null);
+  const [backendProjects, setBackendProjects] = useState<Project[]>([]);
 
   // Work log form
   const [wlDesc, setWlDesc] = useState('');
@@ -64,9 +67,22 @@ export function ProjectManagementPage() {
   const isContractor = user?.role === 'contractor';
   const isGovOrAdmin = user?.role === 'government' || user?.role === 'superadmin';
 
-  const myContractorId = isContractor ? 'contractor1' : null;
-  const visibleProjects = projects.filter(p => {
-    if (isContractor && myContractorId && p.contractor !== myContractorId) return false;
+  async function refreshContractorProjects() {
+    if (!isContractor) return;
+    const response = await api.getProjects();
+    setBackendProjects(response.projects.map((project: any) => mapApiProject(project, user?.name)));
+  }
+
+  useEffect(() => {
+    if (!isContractor) return;
+    refreshContractorProjects().catch((error) => {
+      console.error('Failed to load contractor projects:', error);
+      setBackendProjects([]);
+    });
+  }, [isContractor, user?.name]);
+
+  const sourceProjects = isContractor ? backendProjects : projects;
+  const visibleProjects = sourceProjects.filter(p => {
     if (filterStatus !== 'all' && p.status !== filterStatus) return false;
     if (search && !p.title.toLowerCase().includes(search.toLowerCase()) &&
         !p.location.address.toLowerCase().includes(search.toLowerCase())) return false;
@@ -119,8 +135,24 @@ export function ProjectManagementPage() {
     setNewStart(''); setNewEnd(''); setNewAddress(''); setNewComplaints([]);
   }
 
-  function handleAddWorkLog(projectId: string) {
+  async function handleAddWorkLog(projectId: string) {
     if (!wlDesc) return;
+    if (isContractor) {
+      try {
+        await api.addProjectWorkLog(projectId, {
+          description: wlDesc,
+          workers_count: parseInt(wlWorkers) || 0,
+          materials_used: wlMaterials.split(',').map(s => s.trim()).filter(Boolean)
+        });
+        await api.updateProject(projectId, { status: 'in_progress', progress: Math.max(5, visibleProjects.find(p => p.id === projectId)?.progress || 0) });
+        await refreshContractorProjects();
+        setWorkLogModal(null); setWlDesc(''); setWlWorkers(''); setWlMaterials('');
+      } catch (error) {
+        console.error('Failed to add backend work log:', error);
+        alert('Could not submit work log for this assigned project.');
+      }
+      return;
+    }
     addWorkLog(projectId, {
       id: `wl${Date.now()}`, date: new Date().toISOString().split('T')[0],
       description: wlDesc, workersCount: parseInt(wlWorkers) || 0,
@@ -130,9 +162,25 @@ export function ProjectManagementPage() {
     setWorkLogModal(null); setWlDesc(''); setWlWorkers(''); setWlMaterials('');
   }
 
-  function handleUpdateProgress(projectId: string) {
+  async function handleUpdateProgress(projectId: string) {
     const p = parseInt(newProgress);
     if (isNaN(p) || p < 0 || p > 100) return;
+    if (isContractor) {
+      try {
+        const nextStatus = (newProjectStatus as any) || (p >= 100 ? 'completed' : p > 0 ? 'in_progress' : 'planned');
+        await api.updateProject(projectId, {
+          progress: p,
+          status: nextStatus,
+          spent: nextStatus === 'completed' ? visibleProjects.find(pr => pr.id === projectId)?.budget : undefined
+        });
+        await refreshContractorProjects();
+        setProgressModal(null);
+      } catch (error) {
+        console.error('Failed to update backend project:', error);
+        alert('Could not update this assigned project.');
+      }
+      return;
+    }
     updateProject(projectId, {
       progress: p,
       status: (newProjectStatus as any) || undefined,
@@ -141,9 +189,23 @@ export function ProjectManagementPage() {
     setProgressModal(null);
   }
 
-  function handleMarkComplete(projectId: string) {
-    const project = projects.find(pr => pr.id === projectId);
+  async function handleMarkComplete(projectId: string) {
+    const project = sourceProjects.find(pr => pr.id === projectId);
     if (!project) return;
+    if (isContractor) {
+      try {
+        await api.updateProject(projectId, {
+          progress: 100,
+          status: 'completed',
+          spent: project.budget
+        });
+        await refreshContractorProjects();
+      } catch (error) {
+        console.error('Failed to complete backend project:', error);
+        alert('Could not mark this assigned project complete.');
+      }
+      return;
+    }
     updateProject(projectId, {
       progress: 100,
       status: 'completed',
@@ -282,8 +344,8 @@ export function ProjectManagementPage() {
                     <div className="flex flex-wrap gap-2 mt-3">
                       {project.milestones.map((m, i) => (
                         <button key={i}
-                          onClick={() => isContractor && updateMilestone(project.id, i, !m.completed)}
-                          className={`text-xs px-2 py-1 rounded-full transition-colors ${m.completed ? 'bg-accent-500/20 text-accent-400' : 'bg-surface-700 text-surface-400 hover:bg-surface-600'} ${isContractor ? 'cursor-pointer' : 'cursor-default'}`}>
+                          onClick={() => !isContractor && updateMilestone(project.id, i, !m.completed)}
+                          className={`text-xs px-2 py-1 rounded-full transition-colors ${m.completed ? 'bg-accent-500/20 text-accent-400' : 'bg-surface-700 text-surface-400 hover:bg-surface-600'} ${!isContractor ? 'cursor-pointer' : 'cursor-default'}`}>
                           {m.completed ? '✓ ' : ''}{m.title}
                         </button>
                       ))}
@@ -374,8 +436,8 @@ export function ProjectManagementPage() {
                               <div className="space-y-2">
                                 {project.milestones.map((m, i) => (
                                   <div key={i} className="flex items-center gap-3">
-                                    <button onClick={() => isContractor && updateMilestone(project.id, i, !m.completed)}
-                                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${m.completed ? 'border-accent-500 bg-accent-500' : 'border-surface-600'} ${isContractor ? 'cursor-pointer' : 'cursor-default'}`}>
+                                    <button onClick={() => !isContractor && updateMilestone(project.id, i, !m.completed)}
+                                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${m.completed ? 'border-accent-500 bg-accent-500' : 'border-surface-600'} ${!isContractor ? 'cursor-pointer' : 'cursor-default'}`}>
                                       {m.completed && <CheckCircle className="w-3 h-3 text-white" />}
                                     </button>
                                     <div className="flex-1">

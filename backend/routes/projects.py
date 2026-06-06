@@ -57,11 +57,17 @@ async def create_project(
         {"$inc": {"active_projects": 1}}
     )
     
-    # Update complaints status
+    # Assignment should not imply work has started. Contractors move work into
+    # progress by updating the project after actual site activity.
     if project_data.complaint_ids:
         await db.complaints.update_many(
             {"_id": {"$in": [ObjectId(c) for c in project_data.complaint_ids]}},
-            {"$set": {"status": "in_progress", "assigned_to": ObjectId(project_data.contractor_id)}}
+            {"$set": {
+                "status": "assigned",
+                "assigned_to": ObjectId(project_data.contractor_id),
+                "progress_percentage": 0,
+                "updated_at": datetime.utcnow()
+            }}
         )
     
     return serialize_project(project_dict)
@@ -149,6 +155,21 @@ async def update_project(
             {"_id": ObjectId(project_id)},
             {"$set": update_dict}
         )
+
+        complaint_update = {}
+        if "progress" in update_dict:
+            complaint_update["progress_percentage"] = update_dict["progress"]
+        if new_status:
+            complaint_update["status"] = "resolved" if new_status == "completed" else new_status
+        elif update_dict.get("progress", 0) > 0 and old_status == "planned":
+            complaint_update["status"] = "in_progress"
+
+        if complaint_update:
+            complaint_update["updated_at"] = datetime.utcnow()
+            await db.complaints.update_many(
+                {"_id": {"$in": project.get("complaint_ids", [])}},
+                {"$set": complaint_update}
+            )
     
     # Update contractor stats if completed
     if new_status == "completed" and old_status != "completed":
@@ -181,6 +202,15 @@ async def add_work_log(
     
     if not ObjectId.is_valid(project_id):
         raise HTTPException(status_code=400, detail="Invalid project ID")
+
+    project = await db.projects.find_one({"_id": ObjectId(project_id)})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if current_user["role"] == "contractor":
+        contractor = await db.contractors.find_one({"user_id": current_user["_id"]})
+        if not contractor or contractor["_id"] != project["contractor_id"]:
+            raise HTTPException(status_code=403, detail="Not authorized")
     
     work_log = {
         "id": str(ObjectId()),

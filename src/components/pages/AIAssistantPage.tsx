@@ -42,6 +42,12 @@ const suggestedPrompts = [
   { icon: ShieldCheck, text: 'Which authority handles drainage complaints?' }
 ];
 
+const roadAliases: Record<string, string[]> = {
+  'MG Road Pothole Repair': ['mg', 'mg road', 'mahatma gandhi road'],
+  'Koramangala Street Light Restoration': ['koramangala', 'koramangala road', '5th block', 'street light'],
+  'HSR Layout Road Resurfacing': ['hsr', 'hsr layout', 'hsr road', 'sector 2', 'resurfacing']
+};
+
 const formatMoney = (value: number) => `₹${value.toLocaleString('en-IN')}`;
 
 function normalize(value: string) {
@@ -63,6 +69,10 @@ function queryTokens(query: string) {
   return normalize(query)
     .split(' ')
     .filter((word) => word.length > 1 && !queryStopWords.has(word));
+}
+
+function hasAny(query: string, words: string[]) {
+  return words.some((word) => query.includes(word));
 }
 
 export function AIAssistantPage() {
@@ -119,11 +129,14 @@ export function AIAssistantPage() {
   };
 
   const findProject = (query: string) => {
+    const normalizedQuery = normalize(query);
     const tokens = queryTokens(query);
     const scored = projects.map((project) => {
-      const haystack = normalize(`${project.id} ${project.title} ${project.description} ${project.location.address} ${project.location.district}`);
-      const exactTitle = haystack.includes(normalize(query)) ? 10 : 0;
-      const score = tokens.reduce((sum, token) => sum + (haystack.includes(token) ? 1 : 0), exactTitle);
+      const aliases = roadAliases[project.title] || [];
+      const haystack = normalize(`${project.id} ${project.title} ${project.description} ${project.location.address} ${project.location.district} ${project.roadType} ${project.contractorName || ''} ${aliases.join(' ')}`);
+      const exactTitle = normalizedQuery.includes(normalize(project.id)) || normalizedQuery.includes(normalize(project.title)) ? 20 : 0;
+      const aliasScore = aliases.some((alias) => normalizedQuery.includes(normalize(alias))) ? 12 : 0;
+      const score = tokens.reduce((sum, token) => sum + (haystack.includes(token) ? 1 : 0), exactTitle + aliasScore);
       return { project, score };
     }).sort((a, b) => b.score - a.score);
 
@@ -140,6 +153,18 @@ export function AIAssistantPage() {
     }).sort((a, b) => b.score - a.score);
 
     return scored[0]?.score > 0 ? scored[0].complaint : undefined;
+  };
+
+  const findContractor = (query: string) => {
+    const q = normalize(query);
+    const tokens = queryTokens(query);
+    const scored = contractors.map((contractor) => {
+      const haystack = normalize(`${contractor.id} ${contractor.name} ${contractor.company} ${contractor.license} ${contractor.email} ${contractor.specialization.join(' ')}`);
+      const exact = q.includes(normalize(contractor.id)) || q.includes(normalize(contractor.company)) || q.includes(normalize(contractor.name)) ? 15 : 0;
+      const score = tokens.reduce((sum, token) => sum + (haystack.includes(token) ? 1 : 0), exact);
+      return { contractor, score };
+    }).sort((a, b) => b.score - a.score);
+    return scored[0]?.score > 0 ? scored[0].contractor : undefined;
   };
 
   const projectAnswer = (project: typeof projects[number]) => {
@@ -206,12 +231,15 @@ export function AIAssistantPage() {
     const query = normalize(rawQuery);
     const matchedProject = findProject(rawQuery);
     const matchedComplaint = findComplaint(rawQuery);
-    const asksMoney = ['estimate', 'estimated', 'budget', 'cost', 'spent', 'sanction', 'allocation', 'amount'].some((word) => query.includes(word));
-    const asksContractor = ['contractor', 'constructor', 'company', 'license', 'who is doing', 'who handles'].some((word) => query.includes(word));
-    const asksProgress = ['progress', 'status', 'timeline', 'completion', 'work', 'repair history'].some((word) => query.includes(word));
-    const asksAuthority = ['authority', 'route', 'routing', 'engineer', 'department', 'responsible'].some((word) => query.includes(word));
+    const matchedContractor = findContractor(rawQuery);
+    const asksMoney = hasAny(query, ['estimate', 'estimated', 'budget', 'cost', 'spent', 'spend', 'sanction', 'allocation', 'amount', 'money', 'fund']);
+    const asksContractor = hasAny(query, ['contractor', 'constructor', 'company', 'license', 'builder', 'agency', 'who is doing', 'who handles', 'assigned']);
+    const asksProgress = hasAny(query, ['progress', 'status', 'timeline', 'completion', 'complete', 'work', 'repair history', 'milestone', 'finished']);
+    const asksAuthority = hasAny(query, ['authority', 'route', 'routing', 'engineer', 'department', 'responsible', 'officer', 'who to complain']);
+    const asksRoadMeta = hasAny(query, ['road type', 'type', 'last relay', 'relaying', 'quality', 'source', 'details', 'info']);
+    const asksComplaints = hasAny(query, ['complaint', 'complaints', 'issue', 'issues', 'pending', 'verified', 'resolved', 'critical', 'severity']);
 
-    if (matchedProject && (asksMoney || asksContractor || asksProgress || query.includes('road'))) {
+    if (matchedProject && (asksMoney || asksContractor || asksProgress || asksRoadMeta || query.includes('road') || query.includes('layout'))) {
       return {
         content: projectAnswer(matchedProject),
         actions: [
@@ -221,9 +249,28 @@ export function AIAssistantPage() {
       };
     }
 
-    if (matchedComplaint && (query.includes('complaint') || query.includes('issue') || query.includes('status') || asksMoney)) {
+    if (matchedComplaint && (asksComplaints || asksProgress || asksMoney || query.includes(matchedComplaint.id.toLowerCase()))) {
       return {
         content: complaintAnswer(matchedComplaint),
+        actions: [
+          { label: 'Open Complaints', icon: AlertCircle },
+          { label: 'View Map', icon: MapPin }
+        ]
+      };
+    }
+
+    if (asksComplaints) {
+      const filtered = complaints.filter((complaint) => {
+        if (query.includes('pending')) return complaint.status === 'pending';
+        if (query.includes('verified')) return complaint.status === 'verified';
+        if (query.includes('assigned')) return complaint.status === 'assigned';
+        if (query.includes('resolved')) return complaint.status === 'resolved';
+        if (query.includes('critical')) return complaint.severity === 'critical';
+        if (query.includes('high')) return complaint.severity === 'high';
+        return complaint.status !== 'resolved';
+      });
+      return {
+        content: `${filtered.length} complaint(s) matched your query:\n\n${filtered.map((complaint) => `• ${complaint.id}: ${complaint.title} - ${complaint.category}, ${complaint.severity}, ${statusLabel(complaint.status)}, estimate ${formatMoney(complaint.aiAnalysis?.estimatedCost || 0)}`).join('\n') || 'No matching complaints found.'}\n\nAsk with a complaint ID, like "status of C003", for the full detail.`,
         actions: [
           { label: 'Open Complaints', icon: AlertCircle },
           { label: 'View Map', icon: MapPin }
@@ -254,6 +301,25 @@ export function AIAssistantPage() {
         actions: [
           { label: 'Open Budget', icon: BarChart3 },
           { label: 'Transparency', icon: FileText }
+        ]
+      };
+    }
+
+    if (matchedContractor && asksContractor) {
+      const assignedProjects = projects.filter((project) => project.contractor === matchedContractor.id);
+      return {
+        content: `Contractor details for **${matchedContractor.company}**:\n\n` +
+          `• Contact person: ${matchedContractor.name}\n` +
+          `• License: ${matchedContractor.license}\n` +
+          `• Status: ${matchedContractor.status}\n` +
+          `• Rating: ${matchedContractor.rating}/5\n` +
+          `• Performance score: ${matchedContractor.performanceScore}%\n` +
+          `• Regions: ${matchedContractor.regions.join(', ')}\n` +
+          `• Specialization: ${matchedContractor.specialization.join(', ')}\n` +
+          `• Assigned projects: ${assignedProjects.length ? assignedProjects.map((project) => `${project.title} (${statusLabel(project.status)}, ${project.progress}%)`).join(', ') : 'No projects assigned yet'}`,
+        actions: [
+          { label: 'Open Contractors', icon: Truck },
+          { label: 'View Projects', icon: FileText }
         ]
       };
     }
@@ -330,7 +396,7 @@ export function AIAssistantPage() {
     }
 
     return {
-      content: `I can answer road-infrastructure questions using the current prototype data. Try asking in any natural format:\n\n• "What is the estimate for MG Road?"\n• "Who is the contractor for HSR Layout?"\n• "How much money was spent on Koramangala street lights?"\n• "Show pending complaints"\n• "Which authority handles drainage?"\n• "What is the repair status of C001?"\n\nI can cover road type, budget, amount spent, contractor, license, progress, complaint severity, AI cost estimate, authority routing and repair history.`,
+      content: `I can help with road infrastructure, even if the wording is casual. Ask about:\n\n• A road: "MG Road estimate", "HSR contractor", "Koramangala progress"\n• A complaint: "C003 status", "pending complaints", "critical issues"\n• Money: "budget spent by road", "amount sanctioned", "source of funds"\n• Accountability: "road type", "last relaying date", "executive engineer", "responsible authority"\n• Contractor: "Kumar Infrastructure license", "active contractors", "suspended contractors"\n\nCurrent data covers ${projects.length} road projects, ${complaints.length} complaints, ${contractors.length} contractors and ${budgetEntries.length} budget records.`,
       actions: [
         { label: 'Report Issue', icon: AlertCircle },
         { label: 'View Map', icon: MapPin }

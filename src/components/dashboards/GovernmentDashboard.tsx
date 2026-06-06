@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertCircle, CheckCircle, Clock, MapPin, TrendingUp, TrendingDown,
@@ -14,7 +14,8 @@ import { Progress, CircularProgress } from '../ui/Progress';
 import { Modal } from '../ui/Modal';
 import { Input, Textarea, Select } from '../ui/Input';
 import { BarChartComponent, LineChartComponent, DonutChartComponent } from '../charts/Charts';
-import { useStore } from '../../store/useStore';
+import { useStore, Contractor } from '../../store/useStore';
+import { api } from '../../services/api';
 
 export function GovernmentDashboard() {
   const {
@@ -45,16 +46,49 @@ export function GovernmentDashboard() {
 
   // Reject form
   const [rejectNotes, setRejectNotes] = useState('');
+  const [backendContractors, setBackendContractors] = useState<Contractor[]>([]);
+
+  useEffect(() => {
+    let mounted = true;
+    api.getContractors()
+      .then((response) => {
+        if (!mounted) return;
+        setBackendContractors(response.contractors.map((contractor: any) => ({
+          id: contractor._id || contractor.id,
+          name: contractor.user_name || contractor.company,
+          company: contractor.company,
+          license: contractor.license,
+          email: contractor.email || '',
+          phone: contractor.phone || '',
+          rating: contractor.rating || 0,
+          completedProjects: contractor.completed_projects || 0,
+          activeProjects: contractor.active_projects || 0,
+          totalBudget: contractor.total_budget || 0,
+          regions: contractor.regions || [],
+          specialization: contractor.specialization || [],
+          performanceScore: contractor.performance_score || 0,
+          status: 'active',
+          joinedAt: contractor.created_at || new Date().toISOString()
+        })));
+      })
+      .catch((error) => console.error('Failed to load backend contractors:', error));
+    return () => { mounted = false; };
+  }, []);
 
   const pendingComplaints = complaints.filter(c => c.status === 'pending');
   const verifiedComplaints = complaints.filter(c => c.status === 'verified');
   const criticalComplaints = complaints.filter(c => c.severity === 'critical');
   const pendingBudgets = budgetEntries.filter(e => e.status === 'pending');
+  const aiPriorityQueue = [...complaints]
+    .filter(c => c.status !== 'resolved' && c.status !== 'closed' && c.status !== 'rejected')
+    .sort((a, b) => (b.priorityScore || b.aiAnalysis?.priority || 0) - (a.priorityScore || a.aiAnalysis?.priority || 0))
+    .slice(0, 5);
+  const duplicateSupportedCount = complaints.reduce((sum, c) => sum + Math.max(0, (c.supportCount || c.votes || 0) - 1), 0);
 
   const totalBudget = 45000000;
   const utilized = budgetEntries.filter(e => e.status === 'approved' && e.type === 'disbursement').reduce((a, e) => a + e.amount, 0) || 32500000;
 
-  const activeContractors = contractors.filter(c => c.status === 'active');
+  const activeContractors = backendContractors;
 
   // Verify a complaint
   function handleVerify(id: string) {
@@ -63,59 +97,90 @@ export function GovernmentDashboard() {
   }
 
   // Assign complaint to contractor — creates a project
-  function handleAssign(complaintId: string) {
+  async function handleAssign(complaintId: string) {
     if (!assignContractor || !assignBudget) return;
     const complaint = complaints.find(c => c.id === complaintId);
-    const contractor = contractors.find(c => c.id === assignContractor);
-    const projectId = `P${Date.now().toString().slice(-5)}`;
-    addProject({
-      id: projectId,
-      title: `Repair: ${complaint?.title || 'Road Issue'}`,
-      description: complaint?.description || '',
-      roadType: complaint?.location.address.includes('NH') ? 'NH' : 'Ward Road',
-      lastRelayingDate: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0],
-      responsibleAuthority: complaint?.category === 'streetlight' ? 'BBMP Electrical and Road Safety Cell' : complaint?.category === 'drainage' || complaint?.category === 'flooding' ? 'Stormwater Drainage Authority' : 'BBMP Road Infrastructure Division',
-      executiveEngineer: 'Executive Engineer - Road Works',
-      budgetSource: 'Emergency Road Maintenance Contingency Fund',
-      qualityScore: 65,
-      contractor: assignContractor,
-      contractorName: contractor?.company,
-      budget: parseInt(assignBudget),
-      spent: 0,
-      startDate: assignStart || new Date().toISOString().split('T')[0],
-      endDate: assignEnd,
-      status: 'planned',
-      progress: 0,
-      location: complaint?.location || { lat: 12.97, lng: 77.59, address: '', district: 'Bangalore Urban' },
-      complaints: [complaintId],
-      milestones: [
-        { title: 'Site Inspection', completed: false, date: assignStart },
-        { title: 'Material Procurement', completed: false, date: assignStart },
-        { title: 'Repair Work', completed: false, date: assignEnd },
-        { title: 'Quality Check', completed: false, date: assignEnd },
-      ],
-      workLogs: [],
-      approvedBy: user?.name,
-    });
-    // Auto-create budget allocation
-    addBudgetEntry({
-      id: `B${Date.now()}`,
-      projectId,
-      projectTitle: `Repair: ${complaint?.title}`,
-      contractor: contractor?.company || '',
-      amount: parseInt(assignBudget),
-      type: 'allocation',
-      status: 'approved',
-      requestedAt: new Date().toISOString().split('T')[0],
-      approvedAt: new Date().toISOString().split('T')[0],
-      approvedBy: user?.name,
-      district: complaint?.location.district || 'Bangalore Urban',
-      source: 'Emergency Road Maintenance Contingency Fund',
-      sanctionReference: `RW/EMG/${String(Date.now()).slice(-5)}`,
-    });
-    updateComplaint(complaintId, { status: 'assigned', assignedTo: assignContractor });
-    setAssignModal(null);
-    setAssignContractor(''); setAssignBudget(''); setAssignStart(''); setAssignEnd('');
+    const contractor = activeContractors.find(c => c.id === assignContractor);
+    if (!complaint || !contractor) return;
+    const startDate = assignStart || new Date().toISOString().split('T')[0];
+    const endDate = assignEnd || new Date(Date.now() + (complaint.estimatedDays || complaint.aiAnalysis?.estimatedDays || 7) * 86400000).toISOString().split('T')[0];
+    try {
+      const createdProject = await api.createProject({
+        title: `Repair: ${complaint.title || 'Road Issue'}`,
+        description: complaint.description || '',
+        budget: parseInt(assignBudget),
+        start_date: `${startDate}T00:00:00Z`,
+        end_date: `${endDate}T00:00:00Z`,
+        location: {
+          type: 'Point',
+          coordinates: [complaint.location.lng, complaint.location.lat],
+          address: complaint.location.address,
+          district: complaint.location.district
+        },
+        contractor_id: assignContractor,
+        complaint_ids: [complaintId],
+        milestones: [
+          { title: 'Site Inspection', completed: false, date: `${startDate}T00:00:00Z` },
+          { title: 'Material Procurement', completed: false, date: `${startDate}T00:00:00Z` },
+          { title: 'Repair Work', completed: false, date: `${endDate}T00:00:00Z` },
+          { title: 'Quality Check', completed: false, date: `${endDate}T00:00:00Z` },
+        ]
+      });
+      addProject({
+        id: createdProject._id || createdProject.id,
+        title: createdProject.title,
+        description: createdProject.description,
+        roadType: complaint.location.address.includes('NH') ? 'NH' : 'Ward Road',
+        lastRelayingDate: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0],
+        responsibleAuthority: complaint.category === 'streetlight' ? 'BBMP Electrical and Road Safety Cell' : complaint.category === 'drainage' || complaint.category === 'flooding' ? 'Stormwater Drainage Authority' : 'BBMP Road Infrastructure Division',
+        executiveEngineer: 'Executive Engineer - Road Works',
+        budgetSource: 'Emergency Road Maintenance Contingency Fund',
+        qualityScore: 65,
+        contractor: assignContractor,
+        contractorName: contractor.company,
+        budget: parseInt(assignBudget),
+        spent: 0,
+        startDate,
+        endDate,
+        status: 'planned',
+        progress: 0,
+        location: complaint.location,
+        complaints: [complaintId],
+        milestones: [
+          { title: 'Site Inspection', completed: false, date: startDate },
+          { title: 'Material Procurement', completed: false, date: startDate },
+          { title: 'Repair Work', completed: false, date: endDate },
+          { title: 'Quality Check', completed: false, date: endDate },
+        ],
+        workLogs: [],
+        approvedBy: user?.name,
+      });
+      addBudgetEntry({
+        id: `B${Date.now()}`,
+        projectId: createdProject._id || createdProject.id,
+        projectTitle: `Repair: ${complaint.title}`,
+        contractor: contractor.company,
+        amount: parseInt(assignBudget),
+        type: 'allocation',
+        status: 'approved',
+        requestedAt: new Date().toISOString().split('T')[0],
+        approvedAt: new Date().toISOString().split('T')[0],
+        approvedBy: user?.name,
+        district: complaint.location.district,
+        source: 'Emergency Road Maintenance Contingency Fund',
+        sanctionReference: `RW/EMG/${String(Date.now()).slice(-5)}`,
+      });
+      updateComplaint(complaintId, {
+        status: 'assigned',
+        assignedTo: assignContractor,
+        progressPercentage: 0
+      });
+      setAssignModal(null);
+      setAssignContractor(''); setAssignBudget(''); setAssignStart(''); setAssignEnd('');
+    } catch (error) {
+      console.error('Backend assignment failed:', error);
+      alert('Assignment failed. Use a backend contractor linked to a contractor login.');
+    }
   }
 
   // Sanction new budget
@@ -319,6 +384,61 @@ export function GovernmentDashboard() {
             </div>
           </Card>
         </motion.div>
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-6">
+        <Card variant="gradient" padding="none" className="lg:col-span-2">
+          <div className="p-5 border-b border-surface-700/50 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Bot className="w-5 h-5 text-primary-400" />
+              <h2 className="font-semibold text-white">AI Priority Queue</h2>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setCurrentView('complaints')}>Review</Button>
+          </div>
+          <div className="divide-y divide-surface-700/50">
+            {aiPriorityQueue.map((complaint) => (
+              <div key={complaint.id} className="p-4 flex items-center gap-4">
+                <div className="w-12 h-12 rounded-lg bg-primary-500/10 border border-primary-500/20 flex items-center justify-center">
+                  <span className="text-sm font-bold text-primary-300">{complaint.priorityScore || complaint.aiAnalysis?.priority || 0}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <SeverityBadge severity={complaint.severity} />
+                    <StatusBadge status={complaint.status} />
+                    <span className="text-xs text-surface-500">{complaint.supportCount || complaint.votes} supporters</span>
+                  </div>
+                  <p className="font-medium text-white truncate">{complaint.title}</p>
+                  <p className="text-xs text-surface-400">
+                    Cost ₹{(complaint.estimatedCost || complaint.aiAnalysis?.estimatedCost || 0).toLocaleString('en-IN')} • Repair {complaint.estimatedDays || complaint.aiAnalysis?.estimatedDays || 7} days
+                  </p>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => setAssignModal(complaint.id)}>
+                  Assign
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card variant="gradient">
+          <div className="flex items-center gap-2 mb-4">
+            <Target className="w-5 h-5 text-warning-400" />
+            <h2 className="font-semibold text-white">Smart Signals</h2>
+          </div>
+          <div className="space-y-3">
+            {[
+              { label: 'Duplicate Supports', value: duplicateSupportedCount, detail: 'citizens consolidated into existing issues' },
+              { label: 'Avg Repair Estimate', value: `${Math.round(complaints.reduce((sum, c) => sum + (c.estimatedDays || c.aiAnalysis?.estimatedDays || 7), 0) / Math.max(complaints.length, 1))} days`, detail: 'from AI time engine' },
+              { label: 'Hotspot Analytics', value: hotspotZones.length, detail: 'priority zones visible on heatmap' },
+            ].map((item) => (
+              <div key={item.label} className="p-3 bg-surface-800/50 rounded-lg">
+                <p className="text-xs text-surface-400">{item.label}</p>
+                <p className="text-xl font-bold text-white">{item.value}</p>
+                <p className="text-xs text-surface-500">{item.detail}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
       </div>
 
       {/* ── BUDGET SANCTION SECTION ─────────────────────────────────── */}
@@ -544,7 +664,7 @@ export function GovernmentDashboard() {
               </div>
               <Select label="Assign Contractor *" value={assignContractor} onChange={e => setAssignContractor(e.target.value)}
                 options={[{ value:'', label:'Select contractor…' },
-                  ...activeContractors.map(ct => ({ value:ct.id, label:`${ct.company} — ★${ct.rating} — Score:${ct.performanceScore}%` }))]} />
+                  ...activeContractors.map(ct => ({ value:ct.id, label:`${ct.company} — ${ct.email || 'linked contractor login'} — ★${ct.rating} — Score:${ct.performanceScore}%` }))]} />
               <Input label="Repair Budget (₹) *" type="number" value={assignBudget} onChange={e => setAssignBudget(e.target.value)}
                 placeholder={`${c.aiAnalysis?.estimatedCost || 50000}`}
                 helperText={c.aiAnalysis ? `AI estimate: ₹${c.aiAnalysis.estimatedCost?.toLocaleString('en-IN')}` : ''} />
@@ -553,12 +673,13 @@ export function GovernmentDashboard() {
                 <Input label="Target End Date" type="date" value={assignEnd} onChange={e => setAssignEnd(e.target.value)} />
               </div>
               {assignContractor && (() => {
-                const ct = contractors.find(x => x.id === assignContractor);
+                const ct = activeContractors.find(x => x.id === assignContractor);
                 return ct ? (
-                  <div className="bg-accent-500/10 border border-accent-500/20 rounded-xl p-3 grid grid-cols-3 gap-3 text-center">
+                  <div className="bg-accent-500/10 border border-accent-500/20 rounded-xl p-3 grid grid-cols-4 gap-3 text-center">
                     <div><p className="text-xs text-surface-400">Rating</p><p className="font-bold text-white">★ {ct.rating}</p></div>
                     <div><p className="text-xs text-surface-400">Score</p><p className="font-bold text-white">{ct.performanceScore}%</p></div>
                     <div><p className="text-xs text-surface-400">Active</p><p className="font-bold text-white">{ct.activeProjects} projects</p></div>
+                    <div><p className="text-xs text-surface-400">Login</p><p className="font-bold text-white truncate">{ct.email || 'Linked'}</p></div>
                   </div>
                 ) : null;
               })()}

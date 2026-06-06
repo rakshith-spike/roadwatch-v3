@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # File Upload
     UPLOAD_DIR: str = "uploads"
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
+
+    # Road defect detection
+    YOLO_MODEL_PATH: str = "yolov8n.pt"
+    YOLO_CONFIDENCE_THRESHOLD: float = 0.25
+    DUPLICATE_RADIUS_METERS: int = 150
     
     # Grok AI (xAI) API
     GROK_API_KEY: str = ""

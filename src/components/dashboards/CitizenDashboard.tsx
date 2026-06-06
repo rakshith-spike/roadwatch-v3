@@ -23,10 +23,18 @@ import { Progress } from '../ui/Progress';
 export function CitizenDashboard() {
   const { complaints, user, setCurrentView } = useStore();
   
-  const myComplaints = complaints.filter(c => c.reportedBy === 'user1' || true); // Show all for demo
+  const myComplaints = complaints.filter(c =>
+    user?.id ? c.reportedBy === user.id || c.reportedBy === 'user1' : c.reportedBy === 'user1'
+  );
   const resolvedCount = myComplaints.filter(c => c.status === 'resolved').length;
   const pendingCount = myComplaints.filter(c => c.status === 'pending').length;
   const inProgressCount = myComplaints.filter(c => c.status === 'in_progress').length;
+
+  function getComplaintProgress(complaint: typeof complaints[number]) {
+    if (typeof complaint.progressPercentage === 'number') return complaint.progressPercentage;
+    if (complaint.status === 'resolved' || complaint.status === 'closed') return 100;
+    return 0;
+  }
 
   const chartData = [
     { name: 'Jan', complaints: 12, resolved: 10 },
@@ -153,10 +161,12 @@ export function CitizenDashboard() {
                       {complaint.status === 'in_progress' && (
                         <div className="mt-2">
                           <div className="flex items-center justify-between text-xs mb-1">
-                            <span className="text-surface-400">Progress</span>
-                            <span className="text-primary-400">65%</span>
+                            <span className="text-surface-400">
+                              {getComplaintProgress(complaint) > 0 ? 'Contractor Progress' : 'Waiting for contractor update'}
+                            </span>
+                            <span className="text-primary-400">{getComplaintProgress(complaint)}%</span>
                           </div>
-                          <Progress value={65} size="sm" />
+                          <Progress value={getComplaintProgress(complaint)} size="sm" />
                         </div>
                       )}
                     </div>

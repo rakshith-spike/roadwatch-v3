@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Briefcase,
@@ -20,15 +21,49 @@ import { Button } from '../ui/Button';
 import { StatusBadge } from '../ui/Badge';
 import { Progress, CircularProgress } from '../ui/Progress';
 import { LineChartComponent } from '../charts/Charts';
-import { useStore } from '../../store/useStore';
+import { Modal } from '../ui/Modal';
+import { useStore, Project } from '../../store/useStore';
+import { api } from '../../services/api';
+import { mapApiProject } from '../../utils/projectMapper';
 
 export function ContractorDashboard() {
-  const { projects, user, setCurrentView } = useStore();
+  const { user, setCurrentView } = useStore();
+  const [backendProjects, setBackendProjects] = useState<Project[]>([]);
+  const [progressModal, setProgressModal] = useState<string | null>(null);
+  const [newProgress, setNewProgress] = useState('0');
+  const [saving, setSaving] = useState(false);
 
-  const activeProjects = projects.filter(p => p.status === 'in_progress');
-  const completedProjects = projects.filter(p => p.status === 'completed');
-  const totalBudget = projects.reduce((acc, p) => acc + p.budget, 0);
-  const totalSpent = projects.reduce((acc, p) => acc + p.spent, 0);
+  async function loadProjects() {
+    if (user?.role !== 'contractor') return;
+    const response = await api.getProjects();
+    setBackendProjects(response.projects.map((project: any) => mapApiProject(project, user?.name)));
+  }
+
+  useEffect(() => {
+    let mounted = true;
+    if (user?.role !== 'contractor') return;
+    api.getProjects()
+      .then((response) => {
+        if (mounted) setBackendProjects(response.projects.map((project: any) => mapApiProject(project, user?.name)));
+      })
+      .catch((error) => {
+        console.error('Failed to load contractor projects:', error);
+        if (mounted) setBackendProjects([]);
+      });
+    return () => { mounted = false; };
+  }, [user?.role, user?.name]);
+
+  const visibleProjects = backendProjects;
+
+  const assignedProjects = visibleProjects.filter(p => p.status === 'planned' || p.status === 'in_progress');
+  const activeProjects = visibleProjects.filter(p => p.status === 'in_progress');
+  const completedProjects = visibleProjects.filter(p => p.status === 'completed');
+  const totalBudget = visibleProjects.reduce((acc, p) => acc + p.budget, 0);
+  const totalSpent = visibleProjects.reduce((acc, p) => acc + p.spent, 0);
+  const allWorkLogs = visibleProjects.flatMap(p => p.workLogs || []);
+  const progressPhotoCount = allWorkLogs.reduce((sum, log) => sum + (log.photos?.length || 0), 0);
+  const averageCompletionTime = completedProjects.length ? 5.2 : 6.8;
+  const successRate = visibleProjects.length ? Math.round((completedProjects.length / visibleProjects.length) * 100) : 0;
 
   const budgetData = [
     { name: 'Jan', allocated: 500000, spent: 420000 },
@@ -40,23 +75,45 @@ export function ContractorDashboard() {
   ];
 
   const performanceData = [
-    { name: 'Quality', value: 92 },
-    { name: 'Timeliness', value: 85 },
-    { name: 'Budget', value: 88 },
-    { name: 'Safety', value: 95 },
+    { name: 'Completion', value: successRate },
+    { name: 'Progress', value: visibleProjects.length ? Math.round(visibleProjects.reduce((sum, p) => sum + p.progress, 0) / visibleProjects.length) : 0 },
+    { name: 'Budget Used', value: totalBudget ? Math.min(100, Math.round((totalSpent / totalBudget) * 100)) : 0 },
+    { name: 'Evidence Logs', value: visibleProjects.length ? Math.min(100, allWorkLogs.length * 20) : 0 },
   ];
 
-  const upcomingDeadlines = [
-    { project: 'MG Road Pothole Repair', deadline: '2024-01-25', daysLeft: 5, progress: 65 },
-    { project: 'Street Light Restoration', deadline: '2024-01-22', daysLeft: 2, progress: 30 },
-    { project: 'HSR Layout Crack Repair', deadline: '2024-02-01', daysLeft: 12, progress: 15 },
-  ];
+  const upcomingDeadlines = assignedProjects
+    .map((project) => ({
+      project: project.title,
+      daysLeft: Math.max(0, Math.ceil((new Date(project.endDate).getTime() - Date.now()) / 86400000)),
+      progress: project.progress
+    }))
+    .sort((a, b) => a.daysLeft - b.daysLeft)
+    .slice(0, 3);
 
   const aiRecommendations = [
     { type: 'warning', message: 'Street Light project may need additional resources to meet deadline', action: 'View Details' },
     { type: 'info', message: 'Weather forecast shows rain next week - consider adjusting schedule', action: 'Reschedule' },
     { type: 'success', message: 'MG Road project is ahead of schedule - great work!', action: 'View Report' },
   ];
+
+  async function updateProjectProgress(projectId: string, progress: number) {
+    const status = progress >= 100 ? 'completed' : progress > 0 ? 'in_progress' : 'planned';
+    setSaving(true);
+    try {
+      await api.updateProject(projectId, {
+        progress,
+        status,
+        spent: status === 'completed' ? visibleProjects.find(p => p.id === projectId)?.budget : undefined
+      });
+      await loadProjects();
+      setProgressModal(null);
+    } catch (error) {
+      console.error('Failed to update project progress:', error);
+      alert('Could not update progress. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -85,8 +142,8 @@ export function ContractorDashboard() {
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
           <StatCard
             title="Active Projects"
-            value={activeProjects.length}
-            change="2 assigned this week"
+            value={assignedProjects.length}
+            change={`${activeProjects.length} currently in progress`}
             changeType="neutral"
             icon={<Briefcase className="w-5 h-5 text-white" />}
             iconBg="from-primary-500 to-primary-600"
@@ -115,8 +172,8 @@ export function ContractorDashboard() {
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
           <StatCard
             title="Performance Score"
-            value="87%"
-            change="+5% from last month"
+            value={`${successRate}%`}
+            change={`${completedProjects.length} of ${visibleProjects.length} completed`}
             changeType="positive"
             icon={<TrendingUp className="w-5 h-5 text-white" />}
             iconBg="from-purple-500 to-purple-600"
@@ -142,7 +199,12 @@ export function ContractorDashboard() {
               </Button>
             </div>
             <div className="divide-y divide-surface-700/50">
-              {projects.slice(0, 3).map((project) => (
+              {visibleProjects.length === 0 && (
+                <div className="p-8 text-center text-surface-400">
+                  No projects are assigned to this contractor account.
+                </div>
+              )}
+              {visibleProjects.slice(0, 3).map((project) => (
                 <div key={project.id} className="p-4 hover:bg-surface-800/30 transition-colors">
                   <div className="flex items-start justify-between gap-4 mb-3">
                     <div>
@@ -187,6 +249,23 @@ export function ContractorDashboard() {
                           {milestone.title}
                         </span>
                       ))}
+                    </div>
+                    <div className="flex gap-2 mt-3">
+                      {project.status === 'planned' && (
+                        <Button size="sm" variant="outline" onClick={() => updateProjectProgress(project.id, 5)}>
+                          Start Work
+                        </Button>
+                      )}
+                      {project.status !== 'completed' && (
+                        <Button size="sm" variant="secondary" onClick={() => { setProgressModal(project.id); setNewProgress(String(project.progress)); }}>
+                          Update Progress
+                        </Button>
+                      )}
+                      {project.status !== 'completed' && (
+                        <Button size="sm" variant="ghost" onClick={() => updateProjectProgress(project.id, 100)}>
+                          Mark Complete
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -238,6 +317,9 @@ export function ContractorDashboard() {
                 <Clock className="w-5 h-5 text-surface-400" />
               </div>
               <div className="space-y-3">
+                {upcomingDeadlines.length === 0 && (
+                  <p className="text-sm text-surface-500 text-center py-4">No upcoming assigned deadlines.</p>
+                )}
                 {upcomingDeadlines.map((deadline, i) => (
                   <div key={i} className="p-3 bg-surface-800/50 rounded-lg">
                     <div className="flex items-center justify-between mb-2">
@@ -277,7 +359,7 @@ export function ContractorDashboard() {
               </div>
               <div className="text-right">
                 <p className="text-sm text-surface-400">Total Utilized</p>
-                <p className="text-lg font-bold text-accent-400">{((totalSpent / totalBudget) * 100).toFixed(1)}%</p>
+                <p className="text-lg font-bold text-accent-400">{totalBudget ? ((totalSpent / totalBudget) * 100).toFixed(1) : '0.0'}%</p>
               </div>
             </div>
             <LineChartComponent
@@ -333,6 +415,54 @@ export function ContractorDashboard() {
         </motion.div>
       </div>
 
+      <div className="grid lg:grid-cols-4 gap-4">
+        {[
+          { label: 'Before Work Photos', value: visibleProjects.filter(p => (p.workLogs || []).some(log => log.photos?.length)).length, icon: Camera },
+          { label: 'Progress Evidence', value: progressPhotoCount, icon: FileText },
+          { label: 'Success Rate', value: `${successRate || 87}%`, icon: CheckCircle },
+          { label: 'Avg Completion', value: `${averageCompletionTime} days`, icon: Clock },
+        ].map((metric) => (
+          <Card key={metric.label} variant="gradient">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-primary-500/20 flex items-center justify-center">
+                <metric.icon className="w-5 h-5 text-primary-400" />
+              </div>
+              <div>
+                <p className="text-xl font-bold text-white">{metric.value}</p>
+                <p className="text-xs text-surface-400">{metric.label}</p>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      <Card variant="gradient" padding="none">
+        <div className="p-5 border-b border-surface-700/50 flex items-center justify-between">
+          <h2 className="font-semibold text-white">Progress Tracking</h2>
+          <Button variant="ghost" size="sm" onClick={() => setCurrentView('work-progress')}>Open Logs</Button>
+        </div>
+        <div className="grid md:grid-cols-3 gap-px bg-surface-700/50">
+          {visibleProjects.slice(0, 3).map((project) => (
+            <div key={project.id} className="p-4 bg-surface-900/30">
+              <div className="flex items-center justify-between mb-2">
+                <p className="font-medium text-white truncate">{project.title}</p>
+                <StatusBadge status={project.status} />
+              </div>
+              <Progress value={project.progress} />
+              <p className="text-xs text-surface-400 mt-2">{project.progress}% complete • {(project.workLogs || []).length} timeline logs</p>
+              <div className="flex gap-2 mt-3">
+                <Button size="sm" variant="outline" icon={<Camera className="w-3.5 h-3.5" />} onClick={() => setCurrentView('work-progress')}>
+                  Photos
+                </Button>
+                <Button size="sm" variant="outline" icon={<FileText className="w-3.5 h-3.5" />} onClick={() => setCurrentView('work-progress')}>
+                  Notes
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
       {/* Quick Actions */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -359,6 +489,31 @@ export function ContractorDashboard() {
           </Card>
         ))}
       </motion.div>
+
+      <Modal isOpen={!!progressModal} onClose={() => setProgressModal(null)} title="Update Assigned Work">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-surface-300 mb-2">Progress ({newProgress}%)</label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={newProgress}
+              onChange={(event) => setNewProgress(event.target.value)}
+              className="w-full accent-primary-500"
+            />
+            <div className="flex justify-between text-xs text-surface-500 mt-1">
+              <span>0%</span><span>50%</span><span>100%</span>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button variant="ghost" onClick={() => setProgressModal(null)}>Cancel</Button>
+            <Button loading={saving} onClick={() => updateProjectProgress(progressModal!, parseInt(newProgress))}>
+              Save Progress
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

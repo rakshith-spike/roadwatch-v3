@@ -26,7 +26,7 @@ import { LineChartComponent, BarChartComponent, DonutChartComponent } from '../c
 import { useStore } from '../../store/useStore';
 
 export function SuperAdminDashboard() {
-  const { setCurrentView } = useStore();
+  const { setCurrentView, contractors, complaints, budgetEntries } = useStore();
 
   const systemHealth = {
     cpu: 45,
@@ -80,6 +80,18 @@ export function SuperAdminDashboard() {
     { name: 'East', value: 18 },
     { name: 'West', value: 19 }
   ];
+
+  const contractorRanking = [...contractors]
+    .sort((a, b) => b.performanceScore - a.performanceScore)
+    .slice(0, 4);
+  const duplicateSupports = complaints.reduce((sum, complaint) => sum + Math.max(0, (complaint.supportCount || complaint.votes || 0) - 1), 0);
+  const problematicAreas = Object.entries(
+    complaints.reduce<Record<string, number>>((acc, complaint) => {
+      acc[complaint.location.address] = (acc[complaint.location.address] || 0) + 1;
+      return acc;
+    }, {})
+  ).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const approvedBudget = budgetEntries.filter(entry => entry.status === 'approved').reduce((sum, entry) => sum + entry.amount, 0);
 
   return (
     <div className="space-y-6">
@@ -373,6 +385,67 @@ export function SuperAdminDashboard() {
             </div>
           </Card>
         </motion.div>
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-6">
+        <Card variant="gradient">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-semibold text-white">Contractor Ranking</h2>
+            <Button variant="ghost" size="sm" onClick={() => setCurrentView('contractors')}>Manage</Button>
+          </div>
+          <div className="space-y-3">
+            {contractorRanking.map((contractor, index) => (
+              <div key={contractor.id} className="flex items-center gap-3 p-3 bg-surface-800/50 rounded-lg">
+                <span className="w-7 h-7 rounded-lg bg-primary-500/20 text-primary-300 flex items-center justify-center text-sm font-bold">{index + 1}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-white truncate">{contractor.company}</p>
+                  <p className="text-xs text-surface-400">{contractor.completedProjects} completed • rating {contractor.rating}</p>
+                </div>
+                <span className="text-sm font-bold text-accent-400">{contractor.performanceScore}%</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card variant="gradient">
+          <h2 className="font-semibold text-white mb-4">Fraud & Duplicate Analytics</h2>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 bg-surface-800/50 rounded-lg">
+              <p className="text-xs text-surface-400">Duplicate Supports</p>
+              <p className="text-2xl font-bold text-white">{duplicateSupports}</p>
+            </div>
+            <div className="p-3 bg-surface-800/50 rounded-lg">
+              <p className="text-xs text-surface-400">Fraud Risk</p>
+              <p className="text-2xl font-bold text-warning-400">Low</p>
+            </div>
+            <div className="p-3 bg-surface-800/50 rounded-lg">
+              <p className="text-xs text-surface-400">Budget Analytics</p>
+              <p className="text-lg font-bold text-white">₹{(approvedBudget / 100000).toFixed(1)}L</p>
+            </div>
+            <div className="p-3 bg-surface-800/50 rounded-lg">
+              <p className="text-xs text-surface-400">Resolution Metrics</p>
+              <p className="text-lg font-bold text-accent-400">{Math.round((complaints.filter(c => c.status === 'resolved' || c.status === 'closed').length / Math.max(complaints.length, 1)) * 100)}%</p>
+            </div>
+          </div>
+        </Card>
+
+        <Card variant="gradient">
+          <div className="flex items-center gap-2 mb-4">
+            <MapPin className="w-5 h-5 text-danger-400" />
+            <h2 className="font-semibold text-white">Most Problematic Areas</h2>
+          </div>
+          <div className="space-y-3">
+            {problematicAreas.map(([area, count]) => (
+              <div key={area} className="p-3 bg-surface-800/50 rounded-lg">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-white truncate">{area}</p>
+                  <span className="text-sm font-bold text-danger-400">{count}</span>
+                </div>
+                <p className="text-xs text-surface-400">Open issue density and repeat reports</p>
+              </div>
+            ))}
+          </div>
+        </Card>
       </div>
 
       {/* Quick Actions */}

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Truck, Camera, CheckCircle, Clock, AlertTriangle, MapPin,
@@ -11,7 +11,9 @@ import { Badge } from '../ui/Badge';
 import { Progress } from '../ui/Progress';
 import { Modal } from '../ui/Modal';
 import { Input, Textarea } from '../ui/Input';
-import { useStore } from '../../store/useStore';
+import { useStore, Project } from '../../store/useStore';
+import { api } from '../../services/api';
+import { mapApiProject } from '../../utils/projectMapper';
 
 export function WorkProgressPage() {
   const { projects, user, addWorkLog, updateMilestone, updateProject } = useStore();
@@ -21,12 +23,26 @@ export function WorkProgressPage() {
   const [wlWorkers, setWlWorkers] = useState('');
   const [wlMaterials, setWlMaterials] = useState('');
   const [filter, setFilter] = useState('all');
+  const [backendProjects, setBackendProjects] = useState<Project[]>([]);
 
   // For contractor: only show their projects
   const isContractor = user?.role === 'contractor';
-  const myProjects = isContractor
-    ? projects.filter(p => p.contractor === 'contractor1')
-    : projects;
+
+  async function refreshContractorProjects() {
+    if (!isContractor) return;
+    const response = await api.getProjects();
+    setBackendProjects(response.projects.map((project: any) => mapApiProject(project, user?.name)));
+  }
+
+  useEffect(() => {
+    if (!isContractor) return;
+    refreshContractorProjects().catch((error) => {
+      console.error('Failed to load contractor work progress:', error);
+      setBackendProjects([]);
+    });
+  }, [isContractor, user?.name]);
+
+  const myProjects = isContractor ? backendProjects : projects;
 
   const filtered = filter === 'all' ? myProjects : myProjects.filter(p => p.status === filter);
 
@@ -38,8 +54,24 @@ export function WorkProgressPage() {
     ? Math.round(myProjects.reduce((a, p) => a + p.progress, 0) / myProjects.length)
     : 0;
 
-  function handleAddWorkLog(projectId: string) {
+  async function handleAddWorkLog(projectId: string) {
     if (!wlDesc) return;
+    if (isContractor) {
+      try {
+        await api.addProjectWorkLog(projectId, {
+          description: wlDesc,
+          workers_count: parseInt(wlWorkers) || 0,
+          materials_used: wlMaterials.split(',').map(s => s.trim()).filter(Boolean)
+        });
+        await api.updateProject(projectId, { status: 'in_progress', progress: Math.max(5, myProjects.find(p => p.id === projectId)?.progress || 0) });
+        await refreshContractorProjects();
+        setWorkLogModal(null); setWlDesc(''); setWlWorkers(''); setWlMaterials('');
+      } catch (error) {
+        console.error('Failed to submit backend work log:', error);
+        alert('Could not submit work log for this assigned project.');
+      }
+      return;
+    }
     addWorkLog(projectId, {
       id: `wl${Date.now()}`,
       date: new Date().toISOString().split('T')[0],
@@ -52,9 +84,23 @@ export function WorkProgressPage() {
     setWorkLogModal(null); setWlDesc(''); setWlWorkers(''); setWlMaterials('');
   }
 
-  function handleMarkComplete(projectId: string) {
-    const project = projects.find(p => p.id === projectId);
+  async function handleMarkComplete(projectId: string) {
+    const project = myProjects.find(p => p.id === projectId);
     if (!project) return;
+    if (isContractor) {
+      try {
+        await api.updateProject(projectId, {
+          progress: 100,
+          status: 'completed',
+          spent: project.budget
+        });
+        await refreshContractorProjects();
+      } catch (error) {
+        console.error('Failed to mark backend project complete:', error);
+        alert('Could not mark this assigned project complete.');
+      }
+      return;
+    }
     updateProject(projectId, {
       progress: 100,
       status: 'completed',
@@ -62,6 +108,20 @@ export function WorkProgressPage() {
       milestones: project.milestones.map((milestone) => ({ ...milestone, completed: true })),
       notes: `${project.notes ? `${project.notes}\n` : ''}Contractor marked work completed with final progress update.`
     } as any);
+  }
+
+  async function handleStartWork(projectId: string) {
+    if (isContractor) {
+      try {
+        await api.updateProject(projectId, { status: 'in_progress', progress: 5 });
+        await refreshContractorProjects();
+      } catch (error) {
+        console.error('Failed to start backend project:', error);
+        alert('Could not start this assigned project.');
+      }
+      return;
+    }
+    updateProject(projectId, { status: 'in_progress', progress: 5 });
   }
 
   function getStatusColor(status: string) {
@@ -214,8 +274,8 @@ export function WorkProgressPage() {
                       <div className="flex flex-wrap gap-2">
                         {project.milestones.map((m, i) => (
                           <button key={i}
-                            onClick={() => isContractor && updateMilestone(project.id, i, !m.completed)}
-                            className={`text-xs px-2 py-1 rounded-full transition-colors ${m.completed ? 'bg-accent-500/20 text-accent-400 border border-accent-500/20' : 'bg-surface-700 text-surface-400'} ${isContractor ? 'hover:opacity-80 cursor-pointer' : 'cursor-default'}`}>
+                            onClick={() => !isContractor && updateMilestone(project.id, i, !m.completed)}
+                            className={`text-xs px-2 py-1 rounded-full transition-colors ${m.completed ? 'bg-accent-500/20 text-accent-400 border border-accent-500/20' : 'bg-surface-700 text-surface-400'} ${!isContractor ? 'hover:opacity-80 cursor-pointer' : 'cursor-default'}`}>
                             {m.completed ? '✓ ' : '○ '}{m.title}
                           </button>
                         ))}
@@ -228,6 +288,12 @@ export function WorkProgressPage() {
                         <p className="text-xs text-accent-400">Spent: ₹{(project.spent / 1000).toFixed(0)}K</p>
                       </div>
                       <div className="flex flex-col gap-2">
+                        {isContractor && project.status === 'planned' && (
+                          <Button variant="outline" size="sm" icon={<Clock className="w-3.5 h-3.5" />}
+                            onClick={() => handleStartWork(project.id)}>
+                            Start Work
+                          </Button>
+                        )}
                         {isContractor && project.status === 'in_progress' && (
                           <>
                             <Button variant="outline" size="sm" icon={<Camera className="w-3.5 h-3.5" />}

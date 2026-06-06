@@ -1,5 +1,14 @@
 const API_BASE_URL = 'http://localhost:8000/api';
 
+type BackendSessionUser = {
+  name: string;
+  email: string;
+  role?: string | null;
+  phone?: string;
+  district?: string;
+  state?: string;
+};
+
 class ApiService {
   private token: string | null = null;
 
@@ -96,6 +105,37 @@ class ApiService {
     this.setToken(null);
   }
 
+  async ensureBackendSession(user?: BackendSessionUser | null, forceRefresh = false) {
+    if (!forceRefresh && this.getToken()) {
+      try {
+        await this.getMe();
+        return;
+      } catch {
+        this.setToken(null);
+      }
+    }
+
+    if (!user?.email.endsWith('@demo.com')) {
+      throw new Error('Please log in with a backend account before submitting complaints.');
+    }
+
+    const password = 'demo123';
+    try {
+      await this.login(user.email, password);
+      return;
+    } catch {
+      await this.register({
+        name: user.name,
+        email: user.email,
+        password,
+        role: user.role || 'citizen',
+        phone: user.phone,
+        district: user.district || 'Bangalore Urban',
+        state: user.state || 'Karnataka',
+      });
+    }
+  }
+
   // Complaints
   async getComplaints(params?: {
     page?: number;
@@ -139,8 +179,9 @@ class ApiService {
       state: string;
     };
     images?: string[];
+    traffic_importance?: number;
   }) {
-    return this.request<any>('/complaints', {
+    return this.request<any>('/complaints/', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -153,8 +194,59 @@ class ApiService {
     });
   }
 
+  async assignComplaint(id: string, contractorId: string) {
+    const params = new URLSearchParams({ contractor_id: contractorId });
+    return this.request<any>(`/complaints/${id}/assign?${params}`, {
+      method: 'POST',
+    });
+  }
+
   async voteComplaint(id: string) {
     return this.request<any>(`/complaints/${id}/vote`, {
+      method: 'POST',
+    });
+  }
+
+  async supportComplaint(id: string) {
+    return this.request<any>(`/complaints/${id}/support`, {
+      method: 'POST',
+    });
+  }
+
+  async getPriorityQueue(params?: { severity?: string }) {
+    const searchParams = new URLSearchParams();
+    if (params?.severity) searchParams.append('severity', params.severity);
+    return this.request<{ complaints: any[] }>(`/complaints/priority-queue?${searchParams}`);
+  }
+
+  async analyzeComplaintImage(imageUrl: string, context?: {
+    category?: string;
+    title?: string;
+    description?: string;
+    filename?: string;
+  }) {
+    const params = new URLSearchParams({ image_url: imageUrl });
+    if (context) {
+      Object.entries(context).forEach(([key, value]) => {
+        if (value) params.append(key, value);
+      });
+    }
+    return this.request<any>(`/complaints/analyze-image?${params}`, {
+      method: 'POST',
+    });
+  }
+
+  async validateRepair(id: string, afterImageUrl: string) {
+    const params = new URLSearchParams({ after_image_url: afterImageUrl });
+    return this.request<any>(`/complaints/${id}/repair-validation?${params}`, {
+      method: 'POST',
+    });
+  }
+
+  async citizenVerifyComplaint(id: string, fixed: boolean, notes?: string) {
+    const params = new URLSearchParams({ fixed: String(fixed) });
+    if (notes) params.append('notes', notes);
+    return this.request<any>(`/complaints/${id}/citizen-verification?${params}`, {
       method: 'POST',
     });
   }
@@ -199,10 +291,32 @@ class ApiService {
     return this.request<any>(`/projects/${id}`);
   }
 
+  async createProject(data: any) {
+    return this.request<any>('/projects', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   async updateProject(id: string, data: any) {
     return this.request<any>(`/projects/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    });
+  }
+
+  async addProjectWorkLog(id: string, data: {
+    description: string;
+    workers_count: number;
+    materials_used: string[];
+  }) {
+    const params = new URLSearchParams({
+      description: data.description,
+      workers_count: String(data.workers_count),
+    });
+    data.materials_used.forEach((material) => params.append('materials_used', material));
+    return this.request<any>(`/projects/${id}/work-log?${params}`, {
+      method: 'POST',
     });
   }
 
@@ -262,6 +376,21 @@ class ApiService {
 
   async getSLAMetrics() {
     return this.request<any>('/analytics/sla');
+  }
+
+  async getMapIntelligence(params?: {
+    mode?: 'government' | 'citizen';
+    lat?: number;
+    lng?: number;
+    radius_meters?: number;
+  }) {
+    const searchParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined) searchParams.append(key, String(value));
+      });
+    }
+    return this.request<any>(`/analytics/map-intelligence?${searchParams}`);
   }
 
   // Alerts

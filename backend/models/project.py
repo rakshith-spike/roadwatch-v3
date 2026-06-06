@@ -20,6 +20,11 @@ class WorkLog(BaseModel):
     workers_count: int
     materials_used: List[str] = []
     images: List[str] = []
+    before_work_photos: List[str] = []
+    progress_photos: List[str] = []
+    completion_photos: List[str] = []
+    progress_percentage: Optional[int] = None
+    notes: Optional[str] = None
     created_by: str
 
 class ProjectBase(BaseModel):

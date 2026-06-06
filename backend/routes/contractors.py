@@ -38,9 +38,27 @@ async def list_contractors(
     if min_rating:
         query["rating"] = {"$gte": min_rating}
     
-    contractors = await db.contractors.find(query)\
+    contractors = await db.contractors.find({**query, "user_id": {"$exists": True}})\
         .sort("performance_score", -1)\
         .to_list(100)
+
+    valid_user_ids = [c["user_id"] for c in contractors if c.get("user_id")]
+    valid_users = await db.users.find({
+        "_id": {"$in": valid_user_ids},
+        "role": "contractor",
+        "is_active": True,
+    }).to_list(100)
+    valid_user_map = {user["_id"]: user for user in valid_users}
+    contractors = [
+        {
+            **c,
+            "user_name": valid_user_map[c["user_id"]].get("name"),
+            "email": valid_user_map[c["user_id"]].get("email"),
+            "phone": valid_user_map[c["user_id"]].get("phone"),
+        }
+        for c in contractors
+        if c.get("user_id") in valid_user_map
+    ]
     
     contractors = [serialize_contractor(c) for c in contractors]
     

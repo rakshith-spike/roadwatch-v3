@@ -20,6 +20,9 @@ class ContractorUpdate(BaseModel):
 class ContractorResponse(ContractorBase):
     id: str = Field(alias="_id")
     user_id: str
+    user_name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
     rating: float = 0.0
     completed_projects: int = 0
     active_projects: int = 0

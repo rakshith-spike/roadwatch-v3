@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from typing import Optional
 from datetime import datetime, timedelta
 from bson import ObjectId
+from collections import defaultdict
 
 from database import get_database
 from utils.security import get_current_user, require_roles
@@ -239,6 +240,97 @@ async def get_hotspot_zones(
         })
     
     return {"hotspots": hotspots}
+
+@router.get("/map-intelligence")
+async def get_map_intelligence(
+    mode: str = Query("government", pattern="^(government|citizen)$"),
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    radius_meters: int = Query(3000, ge=250, le=25000),
+    current_user: dict = Depends(get_current_user)
+):
+    """Return clusters, heatmap cells, and hotspot regions without thousands of raw markers."""
+    db = get_database()
+
+    query = {"status": {"$nin": ["resolved", "closed", "rejected"]}}
+    if mode == "citizen" and lat is not None and lng is not None:
+        query["location.coordinates"] = {
+            "$near": {
+                "$geometry": {"type": "Point", "coordinates": [lng, lat]},
+                "$maxDistance": radius_meters,
+            }
+        }
+
+    limit = 250 if mode == "citizen" else 2000
+    complaints = await db.complaints.find(query).sort("priority_score", -1).limit(limit).to_list(limit)
+
+    cells = defaultdict(lambda: {
+        "count": 0,
+        "critical": 0,
+        "priority_total": 0,
+        "lat_total": 0.0,
+        "lng_total": 0.0,
+        "categories": defaultdict(int),
+    })
+
+    for complaint in complaints:
+        coords = complaint.get("location", {}).get("coordinates", [0, 0])
+        if len(coords) < 2:
+            continue
+        lng_value, lat_value = coords[0], coords[1]
+        key = f"{round(lat_value, 2)}:{round(lng_value, 2)}"
+        cell = cells[key]
+        cell["count"] += 1
+        cell["critical"] += 1 if complaint.get("severity") == "critical" else 0
+        cell["priority_total"] += complaint.get("priority_score", complaint.get("ai_analysis", {}).get("priority", 50))
+        cell["lat_total"] += lat_value
+        cell["lng_total"] += lng_value
+        cell["categories"][complaint.get("category", "other")] += 1
+
+    clusters = []
+    heatmap = []
+    for key, cell in cells.items():
+        count = cell["count"]
+        categories = dict(cell["categories"])
+        dominant_category = max(categories, key=categories.get) if categories else "other"
+        avg_priority = round(cell["priority_total"] / count, 1)
+        cluster = {
+            "id": key,
+            "lat": cell["lat_total"] / count,
+            "lng": cell["lng_total"] / count,
+            "count": count,
+            "critical": cell["critical"],
+            "averagePriority": avg_priority,
+            "dominantCategory": dominant_category,
+            "severity": "critical" if cell["critical"] else "high" if avg_priority >= 70 else "medium",
+        }
+        clusters.append(cluster)
+        heatmap.append({
+            "lat": cluster["lat"],
+            "lng": cluster["lng"],
+            "intensity": min(1, (count / 12) + (avg_priority / 200)),
+            "count": count,
+        })
+
+    clusters.sort(key=lambda item: (item["averagePriority"], item["count"]), reverse=True)
+    hotspot_regions = [
+        {
+            "name": f"{cluster['dominantCategory'].replace('_', ' ').title()} hotspot",
+            "lat": cluster["lat"],
+            "lng": cluster["lng"],
+            "issueCount": cluster["count"],
+            "riskScore": min(100, round(cluster["averagePriority"] + cluster["critical"] * 5)),
+        }
+        for cluster in clusters[:10]
+    ]
+
+    return {
+        "clusters": clusters[:75],
+        "heatmap": heatmap,
+        "hotspotRegions": hotspot_regions,
+        "nearbyOnly": mode == "citizen",
+        "sourceCount": len(complaints),
+    }
 
 @router.get("/sla")
 async def get_sla_metrics(

@@ -45,6 +45,8 @@ async def create_indexes():
         IndexModel([("category", ASCENDING)]),
         IndexModel([("reported_by", ASCENDING)]),
         IndexModel([("reported_at", DESCENDING)]),
+        IndexModel([("priority_score", DESCENDING)]),
+        IndexModel([("support_count", DESCENDING)]),
         IndexModel([("location.coordinates", GEOSPHERE)]),
     ])
     

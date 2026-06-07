@@ -167,7 +167,10 @@ async def update_project(
         if complaint_update:
             complaint_update["updated_at"] = datetime.utcnow()
             await db.complaints.update_many(
-                {"_id": {"$in": project.get("complaint_ids", [])}},
+                {
+                    "_id": {"$in": project.get("complaint_ids", [])},
+                    "status": {"$nin": ["closed", "rejected"]}
+                },
                 {"$set": complaint_update}
             )
     

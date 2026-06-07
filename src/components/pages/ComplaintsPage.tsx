@@ -136,6 +136,7 @@ function mapApiComplaint(apiComplaint: any) {
     reportedBy: apiComplaint.reported_by,
     reportedAt: apiComplaint.reported_at,
     assignedTo: apiComplaint.assigned_to,
+    assignedContractorName: apiComplaint.assigned_contractor_name,
     resolvedAt: apiComplaint.resolved_at,
     aiAnalysis: apiComplaint.ai_analysis ? {
       category: apiComplaint.ai_analysis.category,

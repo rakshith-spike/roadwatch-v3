@@ -42,6 +42,7 @@ class UserResponse(UserBase):
     role: str
     created_at: datetime
     is_active: bool = True
+    contractor_id: Optional[str] = None
 
     class Config:
         populate_by_name = True

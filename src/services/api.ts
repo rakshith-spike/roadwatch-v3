@@ -1,4 +1,4 @@
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 type BackendSessionUser = {
   name: string;
@@ -36,23 +36,39 @@ class ApiService {
     
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      'Bypass-Tunnel-Reminder': 'true'
     };
 
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      ...options,
-      headers,
-    });
+    try {
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        ...options,
+        headers,
+      });
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-      throw new Error(error.detail || 'Request failed');
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+        throw new Error(error.detail || 'Request failed');
+      }
+
+      return await response.json();
+    } catch (error: any) {
+      // Dynamic import to avoid circular dependency
+      import('../store/useStore').then(({ useStore }) => {
+        // Only show toast for non-auth GET requests or actual mutations
+        if (options.method && options.method !== 'GET' && !endpoint.includes('/auth/')) {
+          useStore.getState().addToast({
+            title: 'Error',
+            message: error.message || 'An unexpected error occurred',
+            type: 'error'
+          });
+        }
+      });
+      throw error;
     }
-
-    return response.json();
   }
 
   // Auth
@@ -66,6 +82,7 @@ class ApiService {
         role: string;
         district?: string;
         state?: string;
+        contractor_id?: string;
       };
     }>('/auth/login', {
       method: 'POST',
@@ -181,36 +198,56 @@ class ApiService {
     images?: string[];
     traffic_importance?: number;
   }) {
-    return this.request<any>('/complaints/', {
+    const res = await this.request<any>('/complaints/', {
       method: 'POST',
       body: JSON.stringify(data),
     });
+    import('../store/useStore').then(({ useStore }) => {
+      useStore.getState().addToast({ title: 'Success', message: 'Complaint submitted successfully', type: 'success' });
+    });
+    return res;
   }
 
   async updateComplaint(id: string, data: any) {
-    return this.request<any>(`/complaints/${id}`, {
+    const res = await this.request<any>(`/complaints/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
+    import('../store/useStore').then(({ useStore }) => {
+      useStore.getState().addToast({ title: 'Success', message: 'Complaint updated', type: 'success' });
+    });
+    return res;
   }
 
   async assignComplaint(id: string, contractorId: string) {
     const params = new URLSearchParams({ contractor_id: contractorId });
-    return this.request<any>(`/complaints/${id}/assign?${params}`, {
+    const res = await this.request<any>(`/complaints/${id}/assign?${params}`, {
       method: 'POST',
     });
+    import('../store/useStore').then(({ useStore }) => {
+      useStore.getState().addToast({ title: 'Assigned', message: 'Complaint assigned to contractor', type: 'success' });
+    });
+    return res;
   }
 
   async voteComplaint(id: string) {
-    return this.request<any>(`/complaints/${id}/vote`, {
+    const res = await this.request<any>(`/complaints/${id}/vote`, {
       method: 'POST',
     });
+    import('../store/useStore').then(({ useStore }) => {
+      useStore.getState().addToast({ title: 'Upvoted', message: 'Your vote has been recorded', type: 'success' });
+    });
+    return res;
   }
 
   async supportComplaint(id: string) {
-    return this.request<any>(`/complaints/${id}/support`, {
+    const res = await this.request<any>(`/complaints/${id}/support`, {
       method: 'POST',
     });
+    import('../store/useStore').then(({ useStore }) => {
+      useStore.getState().addToast({ title: 'Supported', message: 'You have supported this existing complaint', type: 'success' });
+    });
+    return res;
   }
 
   async getPriorityQueue(params?: { severity?: string }) {
@@ -246,9 +283,13 @@ class ApiService {
   async citizenVerifyComplaint(id: string, fixed: boolean, notes?: string) {
     const params = new URLSearchParams({ fixed: String(fixed) });
     if (notes) params.append('notes', notes);
-    return this.request<any>(`/complaints/${id}/citizen-verification?${params}`, {
+    const res = await this.request<any>(`/complaints/${id}/citizen-verification?${params}`, {
       method: 'POST',
     });
+    import('../store/useStore').then(({ useStore }) => {
+      useStore.getState().addToast({ title: 'Verified', message: fixed ? 'Repair confirmed' : 'Repair rejected', type: 'success' });
+    });
+    return res;
   }
 
   async analyzeComplaint(title: string, description: string, category?: string) {
@@ -263,17 +304,24 @@ class ApiService {
     const formData = new FormData();
     formData.append('file', file);
 
-    const response = await fetch(`${API_BASE_URL}/complaints/upload-image`, {
-      method: 'POST',
-      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-      body: formData,
-    });
+    try {
+      const response = await fetch(`${API_BASE_URL}/complaints/upload-image`, {
+        method: 'POST',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        body: formData,
+      });
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
-      throw new Error(error.detail || 'Upload failed');
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+        throw new Error(error.detail || 'Upload failed');
+      }
+      return await response.json();
+    } catch (error: any) {
+      import('../store/useStore').then(({ useStore }) => {
+        useStore.getState().addToast({ title: 'Upload Error', message: error.message, type: 'error' });
+      });
+      throw error;
     }
-    return response.json();
   }
 
   // Projects

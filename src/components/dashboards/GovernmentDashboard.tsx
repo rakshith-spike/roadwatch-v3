@@ -47,31 +47,38 @@ export function GovernmentDashboard() {
   // Reject form
   const [rejectNotes, setRejectNotes] = useState('');
   const [backendContractors, setBackendContractors] = useState<Contractor[]>([]);
+  const [analytics, setAnalytics] = useState<any>(null);
+  const [trends, setTrends] = useState<any>(null);
 
   useEffect(() => {
     let mounted = true;
-    api.getContractors()
-      .then((response) => {
-        if (!mounted) return;
-        setBackendContractors(response.contractors.map((contractor: any) => ({
-          id: contractor._id || contractor.id,
-          name: contractor.user_name || contractor.company,
-          company: contractor.company,
-          license: contractor.license,
-          email: contractor.email || '',
-          phone: contractor.phone || '',
-          rating: contractor.rating || 0,
-          completedProjects: contractor.completed_projects || 0,
-          activeProjects: contractor.active_projects || 0,
-          totalBudget: contractor.total_budget || 0,
-          regions: contractor.regions || [],
-          specialization: contractor.specialization || [],
-          performanceScore: contractor.performance_score || 0,
-          status: 'active',
-          joinedAt: contractor.created_at || new Date().toISOString()
-        })));
-      })
-      .catch((error) => console.error('Failed to load backend contractors:', error));
+    Promise.all([
+      api.getContractors(),
+      api.getDashboardAnalytics(),
+      api.getTrends()
+    ]).then(([contractorsRes, analyticsRes, trendsRes]) => {
+      if (!mounted) return;
+      setBackendContractors(contractorsRes.contractors.map((contractor: any) => ({
+        id: contractor._id || contractor.id,
+        name: contractor.user_name || contractor.company,
+        company: contractor.company,
+        license: contractor.license,
+        email: contractor.email || '',
+        phone: contractor.phone || '',
+        rating: contractor.rating || 0,
+        completedProjects: contractor.completed_projects || 0,
+        activeProjects: contractor.active_projects || 0,
+        totalBudget: contractor.total_budget || 0,
+        regions: contractor.regions || [],
+        specialization: contractor.specialization || [],
+        performanceScore: contractor.performance_score || 0,
+        status: 'active',
+        joinedAt: contractor.created_at || new Date().toISOString()
+      })));
+      setAnalytics(analyticsRes);
+      setTrends(trendsRes.trends);
+    }).catch(error => console.error('Failed to load dashboard data:', error));
+
     return () => { mounted = false; };
   }, []);
 
@@ -217,12 +224,19 @@ export function GovernmentDashboard() {
     setRejectModal(null); setRejectNotes('');
   }
 
-  const complaintsByCategory = [
+  const complaintsByCategory = analytics?.categories ? Object.entries(analytics.categories).map(([key, value]) => ({
+    name: key.charAt(0).toUpperCase() + key.slice(1).replace('_', ' '),
+    value: value as number
+  })) : [
     { name: 'Pothole', value: 234 }, { name: 'Street Light', value: 156 },
     { name: 'Drainage', value: 89 }, { name: 'Crack', value: 67 }, { name: 'Other', value: 45 }
   ];
 
-  const trendData = [
+  const trendData = trends ? trends.map((t: any) => ({
+    name: new Date(t.date).toLocaleDateString('en-US', { weekday: 'short' }),
+    complaints: t.complaints,
+    resolved: t.resolved
+  })).slice(-7) : [
     { name: 'Mon', complaints: 45, resolved: 38 }, { name: 'Tue', complaints: 52, resolved: 45 },
     { name: 'Wed', complaints: 48, resolved: 42 }, { name: 'Thu', complaints: 61, resolved: 50 },
     { name: 'Fri', complaints: 55, resolved: 48 }, { name: 'Sat', complaints: 32, resolved: 30 },
@@ -546,7 +560,7 @@ export function GovernmentDashboard() {
               <h2 className="font-semibold text-white">Complaints by Category</h2>
               <Target className="w-5 h-5 text-surface-400" />
             </div>
-            <DonutChartComponent data={complaintsByCategory} dataKey="value" nameKey="name" centerValue="591" centerLabel="Total" height={200} />
+            <DonutChartComponent data={complaintsByCategory} dataKey="value" nameKey="name" centerValue={analytics?.summary?.total_complaints?.toString() || "591"} centerLabel="Total" height={200} />
           </Card>
         </motion.div>
       </div>

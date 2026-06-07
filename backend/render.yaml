@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: roadwatch-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.12
+      - key: DEBUG
+        value: "False"
+      - key: MONGODB_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: GROK_API_KEY
+        sync: false
+      - key: CORS_ALLOW_ALL
+        value: "true"

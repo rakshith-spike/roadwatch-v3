@@ -28,6 +28,8 @@ import {
 } from './components/pages/PrototypePages';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './services/api';
+import { ErrorBoundary } from './components/ui/ErrorBoundary';
+import { ToastContainer } from './components/ui/Toast';
 
 function DashboardContent() {
   const { user, currentView } = useStore();
@@ -89,6 +91,7 @@ export default function App() {
             district: user.district,
             state: user.state,
             phone: user.phone,
+            contractorId: user.contractor_id,
           });
         })
         .catch(() => {
@@ -97,13 +100,16 @@ export default function App() {
     }
   }, []);
 
-  if (!isAuthenticated) {
-    return <AuthPage />;
-  }
-
   return (
-    <DashboardLayout>
-      <DashboardContent />
-    </DashboardLayout>
+    <ErrorBoundary>
+      {!isAuthenticated ? (
+        <AuthPage />
+      ) : (
+        <DashboardLayout>
+          <DashboardContent />
+        </DashboardLayout>
+      )}
+      <ToastContainer />
+    </ErrorBoundary>
   );
 }

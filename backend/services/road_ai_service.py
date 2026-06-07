@@ -4,7 +4,7 @@ import math
 import os
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -17,9 +17,10 @@ SUPPORTED_DEFECTS = {
     "waterlogging": "Waterlogging",
     "road_edge_damage": "Road Edge Damage",
     "open_manhole": "Open Manhole",
-    "garbage_obstruction": "Garbage Obstruction",
+    "garbage_obstruction": "Garbage / Debris",
 }
 
+# Maps frontend category names → internal issue types
 APP_CATEGORY_TO_ISSUE = {
     "pothole": "pothole",
     "crack": "crack",
@@ -27,6 +28,17 @@ APP_CATEGORY_TO_ISSUE = {
     "drainage": "waterlogging",
     "debris": "garbage_obstruction",
     "streetlight": "other",
+    "other": "other",
+}
+
+# Maps internal issue types → frontend category names
+ISSUE_TO_APP_CATEGORY = {
+    "pothole": "pothole",
+    "crack": "crack",
+    "waterlogging": "flooding",
+    "road_edge_damage": "crack",
+    "open_manhole": "drainage",
+    "garbage_obstruction": "debris",
     "other": "other",
 }
 
@@ -38,22 +50,31 @@ ISSUE_KEYWORDS = {
     ],
     "pothole": ["pothole", "hole", "pit", "crater", "deep hole", "road cavity"],
     "crack": ["crack", "fracture", "split", "broken surface", "surface failure"],
-    "waterlogging": ["waterlogging", "water logging", "flood", "flooding", "standing water", "overflow"],
+    "waterlogging": [
+        "waterlogging", "water logging", "flood", "flooding",
+        "standing water", "overflow", "inundate", "waterlog",
+    ],
     "road_edge_damage": ["edge damage", "shoulder damage", "curb damage", "road edge"],
     "open_manhole": ["open manhole", "manhole", "missing cover"],
 }
 
 YOLO_CLASS_HINTS = {
     "pothole": "pothole",
+    "pot_hole": "pothole",
+    "hole": "pothole",
     "crack": "crack",
+    "fracture": "crack",
     "water": "waterlogging",
     "flood": "waterlogging",
+    "waterlog": "waterlogging",
     "garbage": "garbage_obstruction",
     "trash": "garbage_obstruction",
     "debris": "garbage_obstruction",
+    "waste": "garbage_obstruction",
     "manhole": "open_manhole",
     "edge": "road_edge_damage",
     "curb": "road_edge_damage",
+    "shoulder": "road_edge_damage",
 }
 
 
@@ -77,7 +98,6 @@ class RoadAIService:
             return cls._model
         try:
             from ultralytics import YOLO
-
             cls._model = YOLO(settings.YOLO_MODEL_PATH)
         except Exception as exc:
             cls._model_error = str(exc)
@@ -93,6 +113,7 @@ class RoadAIService:
         description: str = "",
         original_filename: str = "",
     ) -> Dict[str, Any]:
+        """Analyze an image for road defects. Returns structured result."""
         detections = cls._run_yolo(image_path)
         issue_type, classifier_status = cls._hybrid_issue_type(
             detections,
@@ -170,14 +191,16 @@ class RoadAIService:
 
     @staticmethod
     def _map_label(raw_label: str) -> Optional[str]:
+        """Map a raw YOLO class label to an internal issue type."""
+        # Direct match first
         if raw_label in SUPPORTED_DEFECTS:
             return raw_label
+        # Partial match via hints
         for term, mapped in YOLO_CLASS_HINTS.items():
             if term in raw_label:
                 return mapped
         return None
 
-    @classmethod
     @classmethod
     def _hybrid_issue_type(
         cls,
@@ -186,46 +209,71 @@ class RoadAIService:
         title: str,
         description: str,
         filename: str,
-    ) -> tuple[str, str]:
-        context = f"{preferred_category or ''} {title} {description} {filename}".lower().replace("_", " ")
-        keyword_issue = cls._keyword_issue_type(context)
+    ) -> Tuple[str, str]:
+        """
+        Determine the final issue type using a priority cascade:
+        1. Strong YOLO detection (conf ≥ 0.78) — most reliable
+        2. Keyword match in title/description — explicit user intent
+        3. User-selected preferred category — user knows best
+        4. Moderate YOLO detection (conf ≥ 0.55) — fallback AI
+        5. "other" — unknown
+        
+        NOTE: Keywords intentionally do NOT override strong YOLO. A user might
+        write "debris blocking road" while uploading a pothole image — in that
+        case the YOLO (seeing actual pothole) should win.
+        """
         preferred_issue = APP_CATEGORY_TO_ISSUE.get((preferred_category or "").lower())
-        strong_yolo = detections[0] if detections and detections[0].confidence >= 0.78 else None
-
+        
+        # 1. Keyword match in title + description (user-written context)
+        # Prioritize explicit user intent to avoid YOLO misclassifying debris as pothole
+        title_desc_context = f"{title} {description}".lower().replace("_", " ")
+        keyword_issue = cls._keyword_issue_type(title_desc_context)
         if keyword_issue:
-            return keyword_issue, "hybrid-fallback"
+            return keyword_issue, "keyword-match"
+
+        # 2. User-selected category from the form
         if preferred_issue and preferred_issue != "other":
-            return preferred_issue, "hybrid-fallback"
+            return preferred_issue, "user-preferred"
+
+        # 3. Strong YOLO — trust if no explicit user text overrides
+        strong_yolo = detections[0] if detections and detections[0].confidence >= 0.78 else None
         if strong_yolo:
             return strong_yolo.label, "yolo-high-confidence"
-        if detections and detections[0].confidence >= 0.60 and detections[0].label != "pothole":
-            return detections[0].label, "yolo-mapped"
-        if detections and detections[0].label == "pothole" and not preferred_issue:
-            return "pothole", "yolo-mapped"
-        return "other", "hybrid-fallback"
+
+        # 4. Moderate YOLO detection
+        if detections and detections[0].confidence >= 0.55:
+            return detections[0].label, "yolo-moderate"
+
+        # 5. Filename-based hint (last resort before "other")
+        filename_context = filename.lower().replace("_", " ").replace("-", " ")
+        file_keyword = cls._keyword_issue_type(filename_context)
+        if file_keyword:
+            return file_keyword, "filename-hint"
+
+        return "other", "no-detection"
 
     @staticmethod
     def _keyword_issue_type(context: str) -> Optional[str]:
+        """Scan text for issue-type keywords. Returns first match or None."""
         for issue_type, keywords in ISSUE_KEYWORDS.items():
             if any(keyword in context for keyword in keywords):
                 return issue_type
         return None
 
+    @classmethod
     def _fallback_detection(cls, image_path: str, fallback_label: str = "other") -> List[DetectionBox]:
-        filename = os.path.basename(image_path).lower()
-        label = fallback_label if fallback_label in SUPPORTED_DEFECTS else "other"
-        for term, mapped in YOLO_CLASS_HINTS.items():
-            if term in filename:
-                label = mapped
-                break
+        """Generate a synthetic detection box when YOLO produces no results."""
+        # Use fallback_label if it's a supported defect, else try to map it
+        label = fallback_label if fallback_label in SUPPORTED_DEFECTS else "pothole"
         try:
             image = Image.open(image_path)
             width, height = image.size
         except Exception:
             width, height = 1000, 750
+        # Central box covering ~35% of image area
         box = [width * 0.28, height * 0.35, width * 0.72, height * 0.72]
         area = (box[2] - box[0]) * (box[3] - box[1])
-        return [DetectionBox(label=label, confidence=0.62, box=box, area_ratio=area / max(width * height, 1))]
+        return [DetectionBox(label=label, confidence=0.58, box=box, area_ratio=area / max(width * height, 1))]
 
     @staticmethod
     def calculate_severity_score(confidence: float, boxes: List[DetectionBox], support_count: int) -> int:
@@ -282,7 +330,11 @@ class RoadAIService:
 
     @staticmethod
     def priority_score(severity_score: int, support_count: int, traffic_importance: int = 50) -> int:
-        return int(max(0, min(100, round(severity_score * 0.65 + min(support_count, 20) * 1.2 + traffic_importance * 0.22))))
+        return int(max(0, min(100, round(
+            severity_score * 0.65
+            + min(support_count, 20) * 1.2
+            + traffic_importance * 0.22
+        ))))
 
     @staticmethod
     def traffic_importance(location: Dict[str, Any]) -> int:
@@ -300,19 +352,37 @@ class RoadAIService:
         try:
             image = Image.open(image_path).convert("RGB")
             draw = ImageDraw.Draw(image)
-            font = ImageFont.load_default()
+            try:
+                font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
+            except Exception:
+                font = ImageFont.load_default()
+
+            colors = {
+                "pothole": (255, 80, 80),
+                "crack": (255, 165, 0),
+                "waterlogging": (80, 140, 255),
+                "road_edge_damage": (255, 220, 0),
+                "open_manhole": (200, 50, 200),
+                "garbage_obstruction": (120, 210, 80),
+            }
+
             for detection in detections:
+                color = colors.get(detection.label, (255, 210, 0))
                 x1, y1, x2, y2 = detection.box
-                draw.rectangle((x1, y1, x2, y2), outline=(255, 210, 0), width=4)
-                label = f"{SUPPORTED_DEFECTS.get(detection.label, detection.label)} {detection.confidence:.2f}"
-                text_bbox = draw.textbbox((x1, y1), label, font=font)
-                draw.rectangle(text_bbox, fill=(0, 0, 0))
-                draw.text((x1, y1), label, fill=(255, 255, 255), font=font)
+                # Draw bounding box with 3px border
+                draw.rectangle((x1, y1, x2, y2), outline=color, width=3)
+                label = f"{SUPPORTED_DEFECTS.get(detection.label, detection.label)} {detection.confidence:.0%}"
+                text_bbox = draw.textbbox((x1, y1 - 18), label, font=font)
+                draw.rectangle((text_bbox[0] - 2, text_bbox[1] - 2, text_bbox[2] + 2, text_bbox[3] + 2), fill=color)
+                draw.text((x1, y1 - 18), label, fill=(255, 255, 255), font=font)
+
             filename = f"annotated_{uuid.uuid4().hex}.jpg"
             save_path = os.path.join(settings.UPLOAD_DIR, filename)
+            os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
             image.save(save_path, format="JPEG", quality=88)
             return f"/uploads/{filename}"
-        except Exception:
+        except Exception as e:
+            print(f"Annotation failed: {e}")
             return None
 
     @staticmethod

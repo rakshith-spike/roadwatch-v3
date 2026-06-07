@@ -32,7 +32,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
     ]
     # Set CORS_ALLOW_ALL=true in .env to allow all origins (useful for hackathon demos)
-    CORS_ALLOW_ALL: bool = False
+    CORS_ALLOW_ALL: bool = True
 
     # Frontend URL (for CORS)
     FRONTEND_URL: str = ""

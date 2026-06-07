@@ -82,7 +82,7 @@ export default function App() {
     const token = localStorage.getItem('roadwatch_token');
     if (token && !isAuthenticated) {
       api.getMe()
-        .then(user => {
+        .then(async user => {
           setUser({
             id: user._id || user.id,
             name: user.name,
@@ -99,6 +99,47 @@ export default function App() {
         });
     }
   }, []);
+
+  // Fetch real backend data when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      api.getComplaints().then(({ complaints }) => {
+        if (complaints && complaints.length > 0) {
+          const mappedComplaints = complaints.map((c: any) => ({
+            id: c._id || c.id,
+            title: c.title,
+            description: c.description,
+            category: c.category,
+            severity: c.severity,
+            status: c.status,
+            location: {
+              lat: c.location?.coordinates?.[1] || 12.9716,
+              lng: c.location?.coordinates?.[0] || 77.5946,
+              address: c.location?.address || 'Bangalore',
+              district: c.location?.district || 'Bangalore Urban',
+              state: c.location?.state || 'Karnataka'
+            },
+            images: c.images || [],
+            reportedBy: c.reported_by || c.reportedBy,
+            reportedAt: c.reported_at || c.reportedAt || new Date().toISOString(),
+            assignedTo: c.assigned_to,
+            assignedContractorName: c.assigned_contractor_name,
+            resolvedAt: c.resolved_at,
+            votes: c.votes || 0,
+            supportCount: c.support_count || 0,
+            supportedBy: c.supported_by || [],
+            estimatedCost: c.estimated_cost,
+            priorityScore: c.priority_score,
+            severityScore: c.severity_score,
+            trafficImportance: c.traffic_importance,
+            progressPercentage: c.progress_percentage || 0,
+            comments: c.comments?.length || 0
+          }));
+          useStore.setState({ complaints: mappedComplaints });
+        }
+      }).catch(e => console.error('Failed to fetch complaints', e));
+    }
+  }, [isAuthenticated]);
 
   return (
     <ErrorBoundary>

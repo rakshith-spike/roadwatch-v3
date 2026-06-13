@@ -187,6 +187,9 @@ export function ComplaintsPage() {
   const [damageDetection, setDamageDetection] = useState<DamageDetection | null>(null);
   const [gpsLocation, setGpsLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [duplicateSupported, setDuplicateSupported] = useState(false);
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [complaintToAssign, setComplaintToAssign] = useState<any | null>(null);
+  const [selectedContractorId, setSelectedContractorId] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [newComplaint, setNewComplaint] = useState({
@@ -306,9 +309,40 @@ export function ComplaintsPage() {
     setUploading(false);
   };
 
-  const handleAIAnalysis = () => {
+  const handleAIAnalysis = async () => {
     setAiAnalyzing(true);
-    setTimeout(() => {
+    try {
+      const { api } = await import('../../services/api');
+      const analysis = await api.analyzeComplaint(newComplaint.title, newComplaint.description, newComplaint.category);
+      
+      const category = analysis.category || newComplaint.category || 'other';
+      const severity = analysis.severity || 'medium';
+      const confidence = analysis.confidence ? Math.round(analysis.confidence * (analysis.confidence <= 1 ? 100 : 1)) : 85;
+      const days = analysis.estimated_resolution_days || 7;
+      
+      const detected: DamageDetection = {
+        category: category as any,
+        label: categoryLabels[category as ComplaintCategory] || category.replaceAll('_', ' '),
+        severity: severity as any,
+        priority: analysis.priority || 50,
+        estimatedCost: analysis.estimated_cost || 30000,
+        resolutionTime: `${days} days`,
+        confidence,
+        reason: (analysis.recommendations && analysis.recommendations.length > 0)
+          ? `AI Recommendations: ${analysis.recommendations.join(', ')}`
+          : 'AI analysis completed based on complaint details.'
+      };
+      
+      setDamageDetection(detected);
+      setNewComplaint((prev) => ({
+        ...prev,
+        category: detected.category,
+        title: prev.title || `${categoryLabels[detected.category]} reported`,
+        description: prev.description || `${detected.label} detected from complaint details. Please review and add more details if needed.`
+      }));
+      setShowAIAnalysis(true);
+    } catch (err) {
+      console.error("AI Analysis failed, falling back to local detection:", err);
       const detected = detectDamageFromImages([], newComplaint.title, newComplaint.description);
       setDamageDetection(detected);
       setNewComplaint((prev) => ({
@@ -317,9 +351,10 @@ export function ComplaintsPage() {
         title: prev.title || `${categoryLabels[detected.category]} reported`,
         description: prev.description || `${detected.label} detected from complaint details. Please review and add more details if needed.`
       }));
-      setAiAnalyzing(false);
       setShowAIAnalysis(true);
-    }, 2000);
+    } finally {
+      setAiAnalyzing(false);
+    }
   };
 
   const handleSubmitComplaint = async () => {
@@ -400,22 +435,28 @@ export function ComplaintsPage() {
     updateComplaint(id, { status: 'rejected' });
   }
 
-  async function handleAssignComplaint(id: string) {
-    const complaint = complaints.find((item) => item.id === id);
+  function handleAssignClick(complaint: any) {
+    setComplaintToAssign(complaint);
+    const best = findBestContractor(complaint.category);
+    setSelectedContractorId(best ? best.id : '');
+    setAssignModalOpen(true);
+  }
+
+  async function executeAssignment(complaintId: string, contractorId: string) {
+    const complaint = complaints.find((item) => item.id === complaintId);
     if (!complaint) return;
-    const isBackendComplaint = /^[a-f\d]{24}$/i.test(id);
+    
+    const contractor = contractors.find(c => c.id === contractorId);
+    if (!contractor) return;
+
+    const budget = complaint.estimatedCost || complaint.aiAnalysis?.estimatedCost || 50000;
+    const startDate = new Date().toISOString().split('T')[0];
+    const endDate = new Date(Date.now() + (complaint.estimatedDays || complaint.aiAnalysis?.estimatedDays || 7) * 86400000).toISOString().split('T')[0];
+    
+    const isBackendComplaint = /^[a-f\d]{24}$/i.test(complaintId);
     if (isBackendComplaint) {
       try {
         const { api } = await import("../../services/api");
-        const response = await api.getContractors();
-        const backendContractor = response.contractors[0];
-        if (!backendContractor) {
-          alert('No backend contractor with a valid login is available.');
-          return;
-        }
-        const budget = complaint.estimatedCost || complaint.aiAnalysis?.estimatedCost || 50000;
-        const startDate = new Date().toISOString().split('T')[0];
-        const endDate = new Date(Date.now() + (complaint.estimatedDays || complaint.aiAnalysis?.estimatedDays || 7) * 86400000).toISOString().split('T')[0];
         const project = await api.createProject({
           title: `Repair: ${complaint.title}`,
           description: complaint.description,
@@ -428,7 +469,7 @@ export function ComplaintsPage() {
             address: complaint.location.address,
             district: complaint.location.district
           },
-          contractor_id: backendContractor._id || backendContractor.id,
+          contractor_id: contractor.id,
           complaint_ids: [complaint.id],
           milestones: [
             { title: 'Site Inspection', completed: false, date: `${startDate}T00:00:00Z` },
@@ -437,6 +478,7 @@ export function ComplaintsPage() {
             { title: 'Quality Check', completed: false, date: `${endDate}T00:00:00Z` }
           ]
         });
+        
         addProject({
           id: project._id || project.id,
           title: project.title,
@@ -447,8 +489,8 @@ export function ComplaintsPage() {
           executiveEngineer: complaint.severity === 'critical' ? 'Executive Engineer - Emergency Road Works' : 'Executive Engineer - Road Works',
           budgetSource: 'Ward Infrastructure Maintenance Fund',
           qualityScore: complaint.severity === 'critical' ? 45 : 65,
-          contractor: backendContractor._id || backendContractor.id,
-          contractorName: backendContractor.company,
+          contractor: contractor.id,
+          contractorName: contractor.company,
           budget,
           spent: 0,
           startDate,
@@ -467,76 +509,75 @@ export function ComplaintsPage() {
           approvedBy: user?.name,
           notes: `Backend-created from complaint ${complaint.id}`
         });
-        updateComplaint(id, {
+        
+        updateComplaint(complaintId, {
           status: 'assigned',
-          assignedTo: backendContractor._id || backendContractor.id,
+          assignedTo: contractor.id,
           progressPercentage: 0
         });
-        return;
       } catch (error) {
         console.error('Backend complaint assignment failed:', error);
-        alert('Assignment failed. Please assign to a backend contractor profile linked to contractor@demo.com.');
-        return;
+        alert('Assignment failed. Please review database logs.');
       }
+    } else {
+      const projectId = `P${String(Date.now()).slice(-5)}`;
+      const source = complaint.severity === 'critical'
+        ? 'Emergency Road Maintenance Contingency Fund'
+        : 'Ward Infrastructure Maintenance Fund';
+        
+      addProject({
+        id: projectId,
+        title: `Repair: ${complaint.title}`,
+        description: complaint.description,
+        roadType: complaint.location.address.includes('NH') ? 'NH' : complaint.location.address.includes('SH') ? 'SH' : 'Ward Road',
+        lastRelayingDate: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0],
+        responsibleAuthority: getRoutingAuthority(complaint.category, complaint.severity),
+        executiveEngineer: complaint.severity === 'critical' ? 'Executive Engineer - Emergency Road Works' : 'Executive Engineer - Road Works',
+        budgetSource: source,
+        qualityScore: complaint.severity === 'critical' ? 45 : 65,
+        contractor: contractor.id,
+        contractorName: contractor.company,
+        budget,
+        spent: 0,
+        startDate: new Date().toISOString().split('T')[0],
+        endDate: new Date(Date.now() + (complaint.severity === 'critical' ? 2 : 7) * 86400000).toISOString().split('T')[0],
+        status: 'planned',
+        progress: 0,
+        location: complaint.location,
+        complaints: [complaint.id],
+        milestones: [
+          { title: 'Site Inspection', completed: false, date: new Date().toISOString().split('T')[0] },
+          { title: 'Material Procurement', completed: false, date: new Date(Date.now() + 86400000).toISOString().split('T')[0] },
+          { title: 'Repair Work', completed: false, date: new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0] },
+          { title: 'Quality Check', completed: false, date: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0] }
+        ],
+        workLogs: [],
+        approvedBy: user?.name,
+        notes: `Auto-assigned from complaint ${complaint.id}`
+      });
+      
+      addBudgetEntry({
+        id: `B${Date.now()}`,
+        projectId,
+        projectTitle: `Repair: ${complaint.title}`,
+        contractor: contractor.company,
+        amount: budget,
+        type: 'allocation',
+        status: 'approved',
+        requestedAt: new Date().toISOString().split('T')[0],
+        approvedAt: new Date().toISOString().split('T')[0],
+        approvedBy: user?.name,
+        district: complaint.location.district,
+        source,
+        sanctionReference: `RW/AUTO/${String(Date.now()).slice(-5)}`
+      });
+      
+      updateComplaint(complaintId, {
+        status: 'assigned',
+        assignedTo: contractor.id,
+        progressPercentage: 0
+      });
     }
-
-    const contractor = findBestContractor(complaint.category);
-    if (!contractor) return;
-    const budget = complaint.aiAnalysis?.estimatedCost || 50000;
-    const projectId = `P${String(Date.now()).slice(-5)}`;
-    const source = complaint.severity === 'critical'
-      ? 'Emergency Road Maintenance Contingency Fund'
-      : 'Ward Infrastructure Maintenance Fund';
-    addProject({
-      id: projectId,
-      title: `Repair: ${complaint.title}`,
-      description: complaint.description,
-      roadType: complaint.location.address.includes('NH') ? 'NH' : complaint.location.address.includes('SH') ? 'SH' : 'Ward Road',
-      lastRelayingDate: new Date(new Date().setFullYear(new Date().getFullYear() - 1)).toISOString().split('T')[0],
-      responsibleAuthority: getRoutingAuthority(complaint.category, complaint.severity),
-      executiveEngineer: complaint.severity === 'critical' ? 'Executive Engineer - Emergency Road Works' : 'Executive Engineer - Road Works',
-      budgetSource: source,
-      qualityScore: complaint.severity === 'critical' ? 45 : 65,
-      contractor: contractor.id,
-      contractorName: contractor.company,
-      budget,
-      spent: 0,
-      startDate: new Date().toISOString().split('T')[0],
-      endDate: new Date(Date.now() + (complaint.severity === 'critical' ? 2 : 7) * 86400000).toISOString().split('T')[0],
-      status: 'planned',
-      progress: 0,
-      location: complaint.location,
-      complaints: [complaint.id],
-      milestones: [
-        { title: 'Site Inspection', completed: false, date: new Date().toISOString().split('T')[0] },
-        { title: 'Material Procurement', completed: false, date: new Date(Date.now() + 86400000).toISOString().split('T')[0] },
-        { title: 'Repair Work', completed: false, date: new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0] },
-        { title: 'Quality Check', completed: false, date: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0] }
-      ],
-      workLogs: [],
-      approvedBy: user?.name,
-      notes: `Auto-created from complaint ${complaint.id}`
-    });
-    addBudgetEntry({
-      id: `B${Date.now()}`,
-      projectId,
-      projectTitle: `Repair: ${complaint.title}`,
-      contractor: contractor.company,
-      amount: budget,
-      type: 'allocation',
-      status: 'approved',
-      requestedAt: new Date().toISOString().split('T')[0],
-      approvedAt: new Date().toISOString().split('T')[0],
-      approvedBy: user?.name,
-      district: complaint.location.district,
-      source,
-      sanctionReference: `RW/AUTO/${String(Date.now()).slice(-5)}`
-    });
-    updateComplaint(id, {
-      status: 'assigned',
-      assignedTo: contractor.id,
-      progressPercentage: 0
-    });
   }
 
   return (
@@ -667,7 +708,7 @@ export function ComplaintsPage() {
                       </div>
                     )}
                     {isGovernmentOrAdmin && complaint.status === 'verified' && (
-                      <Button size="sm" onClick={() => handleAssignComplaint(complaint.id)}>Assign Contractor</Button>
+                      <Button size="sm" onClick={() => handleAssignClick(complaint)}>Assign Contractor</Button>
                     )}
                     
                     <ChevronRight className="w-5 h-5 text-surface-500" />
@@ -906,6 +947,108 @@ export function ComplaintsPage() {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      {/* Contractor Assignment Modal */}
+      <Modal
+        isOpen={assignModalOpen}
+        onClose={() => {
+          setAssignModalOpen(false);
+          setComplaintToAssign(null);
+          setSelectedContractorId('');
+        }}
+        title="Assign Contractor to Complaint"
+        size="md"
+      >
+        {complaintToAssign && (() => {
+          const recommended = findBestContractor(complaintToAssign.category);
+          return (
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs text-surface-400 font-mono">COMPLAINT ID: {complaintToAssign.id}</p>
+                <h3 className="font-semibold text-white">{complaintToAssign.title}</h3>
+                <p className="text-sm text-surface-400 mt-1">{complaintToAssign.description}</p>
+              </div>
+
+              {/* Recommended Contractor highlight */}
+              {recommended && (
+                <div className="p-4 bg-primary-500/10 border border-primary-500/20 rounded-xl space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-accent-400" />
+                    <span className="font-semibold text-white text-sm">🤖 AI Contractor Recommendation</span>
+                  </div>
+                  <p className="text-sm text-white font-medium">{recommended.company} ({recommended.name})</p>
+                  <div className="flex gap-4 text-xs text-surface-400">
+                    <span>Rating: ★{recommended.rating.toFixed(1)}</span>
+                    <span>Performance: {recommended.performanceScore}%</span>
+                    <span>Active Projects: {recommended.activeProjects}</span>
+                  </div>
+                  <p className="text-xs text-accent-300">Reason: Best specialization match for {complaintToAssign.category} and optimal active project load.</p>
+                </div>
+              )}
+
+              {/* Contractor Select */}
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-surface-300">Select Contractor</label>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {contractors.filter(c => c.status === 'active' || c.status === 'pending').map(c => {
+                    const isRec = recommended?.id === c.id;
+                    
+                    // Match score formula
+                    const category = complaintToAssign.category;
+                    const specializationByCategory: Record<string, string[]> = {
+                      pothole: ['Road Repair', 'Road Construction'],
+                      crack: ['Road Repair', 'Road Construction'],
+                      flooding: ['Drainage Systems', 'Road Repair'],
+                      drainage: ['Drainage Systems'],
+                      streetlight: ['Street Lighting'],
+                      debris: ['Road Repair']
+                    };
+                    const desired = specializationByCategory[category] || ['Road Repair'];
+                    const hasSpec = c.specialization.some((item) => desired.includes(item));
+                    const baseScore = hasSpec ? 82 : 45;
+                    const ratingBonus = c.rating * 3;
+                    const loadPenalty = c.activeProjects * 4;
+                    const matchScore = Math.min(100, Math.max(0, Math.round(baseScore + ratingBonus - loadPenalty)));
+                    
+                    return (
+                      <label key={c.id} className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer hover:bg-surface-700/50 border transition-colors ${selectedContractorId === c.id ? 'border-primary-500 bg-surface-800/80' : 'border-surface-700 bg-surface-800/30'}`}>
+                        <input
+                          type="radio"
+                          name="selectedContractor"
+                          value={c.id}
+                          checked={selectedContractorId === c.id}
+                          onChange={() => setSelectedContractorId(c.id)}
+                          className="mt-1 accent-primary-500"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium text-white">{c.company}</p>
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${matchScore >= 80 ? 'bg-green-500/10 text-green-400' : matchScore >= 60 ? 'bg-warning-500/10 text-warning-400' : 'bg-surface-700 text-surface-400'}`}>
+                              {matchScore}% Match
+                            </span>
+                          </div>
+                          <p className="text-xs text-surface-400 mt-0.5">{c.name} • {c.specialization.join(', ')}</p>
+                          <div className="flex gap-3 text-[11px] text-surface-500 mt-1">
+                            <span>★ {c.rating.toFixed(1)}</span>
+                            <span>{c.activeProjects} active</span>
+                            {isRec && <span className="text-accent-400 font-semibold">★ Recommended</span>}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Submit */}
+              <div className="flex gap-3 pt-2">
+                <Button variant="ghost" className="flex-1" onClick={() => { setAssignModalOpen(false); setComplaintToAssign(null); setSelectedContractorId(''); }}>Cancel</Button>
+                <Button className="flex-1" onClick={() => executeAssignment(complaintToAssign.id, selectedContractorId)} disabled={!selectedContractorId}>Assign</Button>
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
     </div>
   );

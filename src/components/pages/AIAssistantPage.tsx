@@ -4,6 +4,7 @@ import {
   Bot,
   Send,
   Mic,
+  MicOff,
   Paperclip,
   Sparkles,
   MapPin,
@@ -19,11 +20,13 @@ import {
   HelpCircle,
   Truck,
   Wallet,
-  ShieldCheck
+  ShieldCheck,
+  Volume2
 } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { useStore } from '../../store/useStore';
+import { ResponsiveContainer, BarChart, Bar, Cell, XAxis, YAxis, Tooltip, PieChart, Pie } from 'recharts';
 
 interface Message {
   id: string;
@@ -77,6 +80,152 @@ function hasAny(query: string, words: string[]) {
 
 export function AIAssistantPage() {
   const { user, complaints, projects, contractors, budgetEntries, setCurrentView } = useStore();
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  const toggleListening = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Web Speech API is not supported in this browser. Please try Chrome, Brave, or Safari.");
+      return;
+    }
+
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-IN';
+
+    recognition.onstart = () => {
+      setIsListening(true);
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error", event);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setInputValue(prev => {
+        const space = prev ? ' ' : '';
+        return prev + space + transcript;
+      });
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
+
+  const speakMessage = (text: string) => {
+    window.speechSynthesis.cancel();
+    const cleanText = text.replace(/\[Chart:\s*\w+\]/g, '').trim();
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const renderBudgetChart = () => {
+    const chartData = projects.map(p => ({
+      name: p.title.length > 15 ? p.title.slice(0, 15) + '...' : p.title,
+      Budget: p.budget,
+      Spent: p.spent
+    }));
+    return (
+      <div className="w-full h-48 mt-4 bg-surface-900/80 p-3 rounded-xl border border-surface-700/50">
+        <p className="text-xs text-surface-400 font-semibold mb-2 uppercase">Budget Comparison (Allocated vs Spent)</p>
+        <ResponsiveContainer width="100%" height="90%">
+          <BarChart data={chartData} margin={{ top: 5, right: 5, left: -15, bottom: 5 }}>
+            <XAxis dataKey="name" stroke="#9ca3af" fontSize={8} tickLine={false} />
+            <YAxis stroke="#9ca3af" fontSize={8} tickLine={false} tickFormatter={(v) => `₹${(v/100000).toFixed(0)}L`} />
+            <Tooltip contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', borderRadius: '0.5rem' }} />
+            <Bar dataKey="Budget" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="Spent" fill="#10b981" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  };
+
+  const renderSeverityChart = () => {
+    const counts = complaints.reduce((acc, c) => {
+      acc[c.severity] = (acc[c.severity] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    const chartData = Object.entries(counts).map(([name, value]) => ({ name: name.toUpperCase(), value }));
+    const COLORS = { CRITICAL: '#ef4444', HIGH: '#f59e0b', MEDIUM: '#3b82f6', LOW: '#10b981' } as Record<string, string>;
+
+    return (
+      <div className="w-full h-48 mt-4 bg-surface-900/80 p-3 rounded-xl border border-surface-700/50 flex flex-col justify-between">
+        <p className="text-xs text-surface-400 font-semibold uppercase">Complaints Severity Distribution</p>
+        <div className="h-[80%] flex items-center justify-center">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={chartData} cx="50%" cy="50%" innerRadius={35} outerRadius={50} paddingAngle={2} dataKey="value" label={({name, value}) => `${name}: ${value}`}>
+                {chartData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={COLORS[entry.name] || '#9ca3af'} />
+                ))}
+              </Pie>
+              <Tooltip contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', borderRadius: '0.5rem' }} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  };
+
+  const renderProgressChart = () => {
+    const chartData = projects.map(p => ({
+      name: p.title.length > 15 ? p.title.slice(0, 15) + '...' : p.title,
+      Progress: p.progress
+    }));
+
+    return (
+      <div className="w-full h-48 mt-4 bg-surface-900/80 p-3 rounded-xl border border-surface-700/50">
+        <p className="text-xs text-surface-400 font-semibold mb-2 uppercase">Project Progress Percentage</p>
+        <ResponsiveContainer width="100%" height="90%">
+          <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 5, left: 15, bottom: 5 }}>
+            <XAxis type="number" domain={[0, 100]} stroke="#9ca3af" fontSize={8} unit="%" />
+            <YAxis type="category" dataKey="name" stroke="#9ca3af" fontSize={8} tickLine={false} width={80} />
+            <Tooltip contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', borderRadius: '0.5rem' }} />
+            <Bar dataKey="Progress" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  };
+
+  const renderMessageContent = (message: Message) => {
+    const hasChartBudget = message.content.includes('[Chart: budget]');
+    const hasChartSeverity = message.content.includes('[Chart: severity]');
+    const hasChartProgress = message.content.includes('[Chart: progress]');
+
+    const displayText = message.content
+      .replace(/\[Chart:\s*budget\]/g, '')
+      .replace(/\[Chart:\s*severity\]/g, '')
+      .replace(/\[Chart:\s*progress\]/g, '')
+      .trim();
+
+    return (
+      <div className="space-y-2">
+        <p className="whitespace-pre-wrap text-sm leading-relaxed">{displayText}</p>
+        {hasChartBudget && renderBudgetChart()}
+        {hasChartSeverity && renderSeverityChart()}
+        {hasChartProgress && renderProgressChart()}
+      </div>
+    );
+  };
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -98,7 +247,7 @@ export function AIAssistantPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = (override?: string) => {
+  const handleSend = async (override?: string) => {
     const outgoing = (override ?? inputValue).trim();
     if (!outgoing) return;
 
@@ -113,8 +262,35 @@ export function AIAssistantPage() {
     setInputValue('');
     setIsTyping(true);
 
-    // Simulate AI response
-    setTimeout(() => {
+    try {
+      const { api } = await import('../../services/api');
+      const response = await api.aiChat(outgoing, {
+        user: { name: user?.name, role: user?.role },
+        projectsSummary: projects.map(p => ({ title: p.title, budget: p.budget, spent: p.spent, progress: p.progress, contractor: p.contractorName, status: p.status })),
+        complaintsSummary: complaints.map(c => ({ id: c.id, title: c.title, severity: c.severity, status: c.status })),
+        contractorsSummary: contractors.map(co => ({ name: co.name, company: co.company, status: co.status, rating: co.rating }))
+      });
+
+      // If backend returned generic fallback but we have local specific answer, use local
+      const localResult = getAIResponse(outgoing);
+      const isGenericFallback = response.response.startsWith("Hello! I'm the ROAD-WATCH") || 
+                               response.response.startsWith("I understand you're asking") ||
+                               response.response.startsWith("I can help you file");
+      
+      const finalContent = (isGenericFallback && (localResult.content.includes("details I found") || localResult.content.includes("matched your query") || localResult.content.includes("registry:")))
+        ? localResult.content
+        : response.response;
+
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: finalContent,
+        timestamp: new Date(),
+        actions: localResult.actions
+      };
+      setMessages(prev => [...prev, aiMessage]);
+    } catch (err) {
+      console.error("AI assistant backend call failed:", err);
       const responses = getAIResponse(outgoing);
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -124,8 +300,9 @@ export function AIAssistantPage() {
         actions: responses.actions
       };
       setMessages(prev => [...prev, aiMessage]);
+    } finally {
       setIsTyping(false);
-    }, 1500);
+    }
   };
 
   const findProject = (query: string) => {
@@ -483,7 +660,7 @@ export function AIAssistantPage() {
                         ? 'bg-primary-500 text-white'
                         : 'bg-surface-800/80 text-surface-200'
                     }`}>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
+                      {renderMessageContent(message)}
                       
                       {message.actions && (
                         <div className="flex flex-wrap gap-2 mt-3">
@@ -508,6 +685,9 @@ export function AIAssistantPage() {
                         </button>
                         <button className="p-1 text-surface-500 hover:text-surface-300">
                           <ThumbsDown className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => speakMessage(message.content)} className="p-1 text-surface-500 hover:text-surface-300" title="Speak response">
+                          <Volume2 className="w-4 h-4" />
                         </button>
                         <button className="p-1 text-surface-500 hover:text-surface-300">
                           <Copy className="w-4 h-4" />
@@ -556,8 +736,12 @@ export function AIAssistantPage() {
                 placeholder="Ask me anything about road infrastructure..."
                 className="flex-1 bg-surface-800/50 border border-surface-700 rounded-xl px-4 py-3 text-white placeholder-surface-500 focus:outline-none focus:border-primary-500 transition-colors"
               />
-              <button className="p-2 text-surface-400 hover:text-white hover:bg-surface-800 rounded-lg transition-colors">
-                <Mic className="w-5 h-5" />
+              <button 
+                onClick={toggleListening} 
+                className={`p-2 rounded-lg transition-colors ${isListening ? 'text-danger-500 bg-danger-500/10 animate-pulse hover:bg-danger-500/20' : 'text-surface-400 hover:text-white hover:bg-surface-800'}`}
+                title={isListening ? "Stop listening" : "Start voice input"}
+              >
+                {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
               </button>
               <Button onClick={() => handleSend()} disabled={!inputValue.trim()}>
                 <Send className="w-4 h-4" />

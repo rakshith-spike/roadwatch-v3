@@ -64,6 +64,13 @@ async def create_indexes():
         IndexModel([("end_date", ASCENDING)]),
     ])
 
+    # Budget collection indexes
+    await db.db.budget.create_indexes([
+        IndexModel([("project_id", ASCENDING)]),
+        IndexModel([("status", ASCENDING)]),
+        IndexModel([("requested_at", DESCENDING)]),
+    ])
+
     print("Database indexes created.")
 
 async def seed_initial_data():
@@ -496,9 +503,11 @@ async def seed_initial_data():
     await db.db.complaints.insert_many(complaints)
 
     # ── Demo Projects ─────────────────────────────────────────────────────────
+    project1_id = ObjectId()
+    project2_id = ObjectId()
     projects = [
         {
-            "_id": ObjectId(),
+            "_id": project1_id,
             "title": "MG Road Pothole Repair",
             "description": "Emergency repair of critical potholes on MG Road stretch",
             "contractor_id": contractor1_id,
@@ -552,7 +561,7 @@ async def seed_initial_data():
             "created_at": datetime.utcnow() - timedelta(days=3),
         },
         {
-            "_id": ObjectId(),
+            "_id": project2_id,
             "title": "Koramangala Street Light Restoration",
             "description": "Restoration of non-functional street lights in 5th Block",
             "contractor_id": contractor2_id,
@@ -597,6 +606,72 @@ async def seed_initial_data():
     ]
 
     await db.db.projects.insert_many(projects)
+
+    # ── Demo Budgets ──────────────────────────────────────────────────────────
+    budget_entries = [
+        {
+            "_id": ObjectId(),
+            "project_id": str(project1_id),
+            "project_title": "MG Road Pothole Repair",
+            "contractor": "Kumar Infrastructure Pvt Ltd",
+            "amount": 500000.0,
+            "type": "allocation",
+            "status": "approved",
+            "requested_at": datetime.utcnow() - timedelta(days=3),
+            "approved_at": datetime.utcnow() - timedelta(days=3),
+            "approved_by": "Dr. Ananya Reddy",
+            "district": "Bangalore Urban",
+            "source": "BBMP Ward Infrastructure Grant FY 2024-25",
+            "sanction_reference": "RW/BLR/94821"
+        },
+        {
+            "_id": ObjectId(),
+            "project_id": str(project1_id),
+            "project_title": "MG Road Pothole Repair",
+            "contractor": "Kumar Infrastructure Pvt Ltd",
+            "amount": 320000.0,
+            "type": "disbursement",
+            "status": "approved",
+            "requested_at": datetime.utcnow() - timedelta(days=2),
+            "approved_at": datetime.utcnow() - timedelta(days=2),
+            "approved_by": "Dr. Ananya Reddy",
+            "district": "Bangalore Urban",
+            "source": "BBMP Ward Infrastructure Grant FY 2024-25",
+            "sanction_reference": "RW/BLR/94822"
+        },
+        {
+            "_id": ObjectId(),
+            "project_id": str(project2_id),
+            "project_title": "Koramangala Street Light Restoration",
+            "contractor": "Sharma Constructions",
+            "amount": 150000.0,
+            "type": "allocation",
+            "status": "approved",
+            "requested_at": datetime.utcnow() - timedelta(days=1),
+            "approved_at": datetime.utcnow() - timedelta(days=1),
+            "approved_by": "Dr. Ananya Reddy",
+            "district": "Bangalore Urban",
+            "source": "Urban Safety and Street Lighting Fund",
+            "sanction_reference": "RW/BLR/94823"
+        },
+        {
+            "_id": ObjectId(),
+            "project_id": str(project2_id),
+            "project_title": "Koramangala Street Light Restoration",
+            "contractor": "Sharma Constructions",
+            "amount": 45000.0,
+            "type": "disbursement",
+            "status": "approved",
+            "requested_at": datetime.utcnow() - timedelta(hours=12),
+            "approved_at": datetime.utcnow() - timedelta(hours=12),
+            "approved_by": "Dr. Ananya Reddy",
+            "district": "Bangalore Urban",
+            "source": "Urban Safety and Street Lighting Fund",
+            "sanction_reference": "RW/BLR/94824"
+        }
+    ]
+    await db.db.budget.insert_many(budget_entries)
+
 
     # ── Alerts ────────────────────────────────────────────────────────────────
     alerts = [

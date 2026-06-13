@@ -18,7 +18,8 @@ from routes import (
     projects_router,
     analytics_router,
     alerts_router,
-    ai_router
+    ai_router,
+    budget_router
 )
 
 # Configure logging
@@ -116,6 +117,7 @@ app.include_router(projects_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(alerts_router, prefix="/api")
 app.include_router(ai_router, prefix="/api")
+app.include_router(budget_router, prefix="/api")
 
 # ── Root Endpoints ────────────────────────────────────────────────────────────
 

@@ -110,6 +110,7 @@ export interface Contractor {
   performanceScore: number;
   status: 'active' | 'suspended' | 'pending';
   joinedAt: string;
+  user_id?: string;
 }
 
 export interface Project {
@@ -245,6 +246,13 @@ interface AppState {
   updateSystemUser: (id: string, updates: Partial<SystemUser>) => void;
   toggleUserStatus: (id: string) => void;
   addSystemUser: (user: SystemUser) => void;
+
+  // Fetch actions
+  fetchProjects: () => Promise<void>;
+  fetchContractors: () => Promise<void>;
+  fetchNotifications: () => Promise<void>;
+  fetchBudgetEntries: () => Promise<void>;
+  fetchSystemUsers: () => Promise<void>;
 }
 
 // ── Mock Data (removed for brevity but we use localStorage merge logic)
@@ -358,117 +366,312 @@ export const useStore = create<AppState>((set) => ({
 
   setLoading: (loading) => set({ isLoading: loading }),
 
-  addProject: (project) => set((state) => {
-    const projects = [project, ...state.projects];
-    persistStored('roadwatch_projects', projects);
-    return { projects };
-  }),
-  updateProject: (id, updates) => set((state) => {
-    const projects = state.projects.map((p) => p.id === id ? { ...p, ...updates } : p);
-    persistStored('roadwatch_projects', projects);
-    return { projects };
-  }),
-  addWorkLog: (projectId, log) => set((state) => {
-    const projects = state.projects.map((p) =>
-      p.id === projectId ? { ...p, workLogs: [...(p.workLogs || []), log] } : p
-    );
-    persistStored('roadwatch_projects', projects);
-    return { projects };
-  }),
-  updateMilestone: (projectId, milestoneIndex, completed) => set((state) => {
-    const projects = state.projects.map((p) => {
-      if (p.id !== projectId) return p;
-      const milestones = [...p.milestones];
-      milestones[milestoneIndex] = { ...milestones[milestoneIndex], completed };
-      const completedCount = milestones.filter(m => m.completed).length;
-      const progress = Math.round((completedCount / milestones.length) * 100);
-      return { ...p, milestones, progress };
-    });
-    persistStored('roadwatch_projects', projects);
-    return { projects };
-  }),
+  addProject: async (project) => {
+    try {
+      const { api } = await import('../services/api');
+      await api.createProject({
+        title: project.title,
+        description: project.description,
+        budget: project.budget,
+        start_date: new Date(project.startDate).toISOString(),
+        end_date: new Date(project.endDate).toISOString(),
+        location: {
+          type: 'Point',
+          coordinates: [project.location.lng, project.location.lat],
+          address: project.location.address,
+          district: project.location.district
+        },
+        contractor_id: project.contractor,
+        complaint_ids: project.complaints,
+        milestones: project.milestones.map(m => ({
+          title: m.title,
+          completed: m.completed,
+          date: new Date(m.date).toISOString()
+        })),
+        road_type: project.roadType,
+        last_relaying_date: project.lastRelayingDate,
+        responsible_authority: project.responsibleAuthority,
+        executive_engineer: project.executiveEngineer,
+        budget_source: project.budgetSource
+      });
+      useStore.getState().fetchProjects();
+      useStore.getState().fetchBudgetEntries();
+    } catch (err) {
+      console.error('Failed to add project', err);
+    }
+  },
+  updateProject: async (id, updates) => {
+    try {
+      const { api } = await import('../services/api');
+      const data: any = {};
+      if (updates.title !== undefined) data.title = updates.title;
+      if (updates.description !== undefined) data.description = updates.description;
+      if (updates.budget !== undefined) data.budget = updates.budget;
+      if (updates.spent !== undefined) data.spent = updates.spent;
+      if (updates.endDate !== undefined) data.end_date = new Date(updates.endDate).toISOString();
+      if (updates.status !== undefined) data.status = updates.status;
+      if (updates.progress !== undefined) data.progress = updates.progress;
 
-  addContractor: (contractor) => set((state) => {
-    const exists = state.contractors.some((existing) => existing.id === contractor.id || existing.email.toLowerCase() === contractor.email.toLowerCase());
-    const contractors = exists
-      ? state.contractors.map((existing) => existing.id === contractor.id || existing.email.toLowerCase() === contractor.email.toLowerCase() ? { ...existing, ...contractor } : existing)
-      : [contractor, ...state.contractors];
-    persistStored('roadwatch_contractors', contractors);
-    return { contractors };
-  }),
-  updateContractor: (id, updates) => set((state) => {
-    const contractors = state.contractors.map((c) => c.id === id ? { ...c, ...updates } : c);
-    persistStored('roadwatch_contractors', contractors);
-    return { contractors };
-  }),
-  suspendContractor: (id) => set((state) => {
-    const contractors = state.contractors.map((c) => c.id === id ? { ...c, status: 'suspended' as const } : c);
-    persistStored('roadwatch_contractors', contractors);
-    return { contractors };
-  }),
-  activateContractor: (id) => set((state) => {
-    const contractors = state.contractors.map((c) => c.id === id ? { ...c, status: 'active' as const } : c);
-    persistStored('roadwatch_contractors', contractors);
-    return { contractors };
-  }),
+      await api.updateProject(id, data);
+      useStore.getState().fetchProjects();
+      useStore.getState().fetchComplaints();
+    } catch (err) {
+      console.error('Failed to update project', err);
+    }
+  },
+  addWorkLog: async (projectId, log) => {
+    try {
+      const { api } = await import('../services/api');
+      await api.addProjectWorkLog(projectId, {
+        description: log.description,
+        workers_count: log.workersCount,
+        materials_used: log.materialsUsed
+      });
+      useStore.getState().fetchProjects();
+    } catch (err) {
+      console.error('Failed to add work log', err);
+    }
+  },
+  updateMilestone: async (projectId, milestoneIndex, completed) => {
+    try {
+      const { api } = await import('../services/api');
+      await api.updateMilestone(projectId, milestoneIndex, completed);
+      useStore.getState().fetchProjects();
+    } catch (err) {
+      console.error('Failed to update milestone', err);
+    }
+  },
 
-  addBudgetEntry: (entry) => set((state) => {
-    const budgetEntries = [entry, ...state.budgetEntries];
-    persistStored('roadwatch_budget_entries', budgetEntries);
-    return { budgetEntries };
-  }),
-  updateBudgetEntry: (id, updates) => set((state) => {
-    const budgetEntries = state.budgetEntries.map((b) => b.id === id ? { ...b, ...updates } : b);
-    persistStored('roadwatch_budget_entries', budgetEntries);
-    return { budgetEntries };
-  }),
-  approveBudget: (id, approverName) => set((state) => {
-    const approvedAt = new Date().toISOString().split('T')[0];
-    const entry = state.budgetEntries.find((b) => b.id === id);
-    const budgetEntries = state.budgetEntries.map((b) =>
-      b.id === id ? { ...b, status: 'approved' as const, approvedBy: approverName, approvedAt } : b
-    );
-    const projects = entry
-      ? state.projects.map((project) => {
-          if (project.id !== entry.projectId) return project;
-          if (entry.type === 'request' || entry.type === 'revision') {
-            return { ...project, budget: project.budget + entry.amount };
-          }
-          if (entry.type === 'disbursement') {
-            return { ...project, spent: Math.min(project.budget, project.spent + entry.amount) };
-          }
-          return project;
-        })
-      : state.projects;
-    persistStored('roadwatch_budget_entries', budgetEntries);
-    persistStored('roadwatch_projects', projects);
-    return { budgetEntries, projects };
-  }),
-  rejectBudget: (id, notes) => set((state) => {
-    const budgetEntries = state.budgetEntries.map((b) =>
-      b.id === id ? { ...b, status: 'rejected', notes } : b
-    );
-    persistStored('roadwatch_budget_entries', budgetEntries);
-    return { budgetEntries };
-  }),
+  addContractor: async (contractor) => {
+    // Adding contractor is handled by backend registration/creation.
+    // We just refresh the list.
+    useStore.getState().fetchContractors();
+  },
+  updateContractor: async (id, updates) => {
+    try {
+      const { api } = await import('../services/api');
+      const data: any = {};
+      if (updates.company !== undefined) data.company = updates.company;
+      if (updates.license !== undefined) data.license = updates.license;
+      if (updates.regions !== undefined) data.regions = updates.regions;
+      if (updates.specialization !== undefined) data.specialization = updates.specialization;
 
-  updateSystemUser: (id, updates) => set((state) => {
-    const systemUsers = state.systemUsers.map((u) => u.id === id ? { ...u, ...updates } : u);
-    persistStored('roadwatch_system_users', systemUsers);
-    return { systemUsers };
-  }),
-  toggleUserStatus: (id) => set((state) => {
-    const systemUsers = state.systemUsers.map((u) => u.id === id ? { ...u, isActive: !u.isActive } : u);
-    persistStored('roadwatch_system_users', systemUsers);
-    return { systemUsers };
-  }),
-  addSystemUser: (user) => set((state) => {
-    const exists = state.systemUsers.some((existing) => existing.email.toLowerCase() === user.email.toLowerCase());
-    const systemUsers = exists
-      ? state.systemUsers.map((existing) => existing.email.toLowerCase() === user.email.toLowerCase() ? { ...existing, ...user } : existing)
-      : [user, ...state.systemUsers];
-    persistStored('roadwatch_system_users', systemUsers);
-    if (typeof localStorage !== 'undefined') localStorage.removeItem('roadwatch_registered_users');
-    return { systemUsers };
-  }),
+      await api.updateContractor(id, data);
+      useStore.getState().fetchContractors();
+    } catch (err) {
+      console.error('Failed to update contractor', err);
+    }
+  },
+  suspendContractor: async (id) => {
+    try {
+      const { api } = await import('../services/api');
+      const contractor = useStore.getState().contractors.find(c => c.id === id);
+      if (contractor && contractor.user_id) {
+        await api.toggleUserStatus(contractor.user_id);
+      }
+      useStore.getState().fetchContractors();
+      useStore.getState().fetchSystemUsers();
+    } catch (err) {
+      console.error('Failed to suspend contractor', err);
+    }
+  },
+  activateContractor: async (id) => {
+    try {
+      const { api } = await import('../services/api');
+      const contractor = useStore.getState().contractors.find(c => c.id === id);
+      if (contractor && contractor.user_id) {
+        await api.toggleUserStatus(contractor.user_id);
+      }
+      useStore.getState().fetchContractors();
+      useStore.getState().fetchSystemUsers();
+    } catch (err) {
+      console.error('Failed to activate contractor', err);
+    }
+  },
+
+  addBudgetEntry: async (entry) => {
+    try {
+      const { api } = await import('../services/api');
+      await api.createBudgetEntry({
+        project_id: entry.projectId,
+        project_title: entry.projectTitle,
+        contractor: entry.contractor,
+        amount: entry.amount,
+        type: entry.type,
+        notes: entry.notes,
+        district: entry.district,
+        source: entry.source,
+        sanction_reference: entry.sanctionReference
+      });
+      useStore.getState().fetchBudgetEntries();
+    } catch (err) {
+      console.error('Failed to add budget entry', err);
+    }
+  },
+  updateBudgetEntry: () => {}, // Handled by approve/reject backend actions
+  approveBudget: async (id, approverName) => {
+    try {
+      const { api } = await import('../services/api');
+      await api.approveBudgetEntry(id);
+      useStore.getState().fetchBudgetEntries();
+      useStore.getState().fetchProjects();
+    } catch (err) {
+      console.error('Failed to approve budget', err);
+    }
+  },
+  rejectBudget: async (id, notes) => {
+    try {
+      const { api } = await import('../services/api');
+      await api.rejectBudgetEntry(id, notes);
+      useStore.getState().fetchBudgetEntries();
+    } catch (err) {
+      console.error('Failed to reject budget', err);
+    }
+  },
+
+  updateSystemUser: async (id, updates) => {
+    try {
+      const { api } = await import('../services/api');
+      await api.updateSystemUser(id, {
+        name: updates.name,
+        role: updates.role,
+        district: updates.district
+      });
+      useStore.getState().fetchSystemUsers();
+    } catch (err) {
+      console.error('Failed to update system user', err);
+    }
+  },
+  toggleUserStatus: async (id) => {
+    try {
+      const { api } = await import('../services/api');
+      await api.toggleUserStatus(id);
+      useStore.getState().fetchSystemUsers();
+      useStore.getState().fetchContractors();
+    } catch (err) {
+      console.error('Failed to toggle user status', err);
+    }
+  },
+  addSystemUser: async (user) => {
+    try {
+      const { api } = await import('../services/api');
+      await api.registerUserByAdmin({
+        name: user.name,
+        email: user.email,
+        role: user.role || 'citizen',
+        district: user.district,
+        state: user.state
+      });
+      useStore.getState().fetchSystemUsers();
+      if (user.role === 'contractor') {
+        useStore.getState().fetchContractors();
+      }
+    } catch (err) {
+      console.error('Failed to add system user', err);
+    }
+  },
+
+  fetchProjects: async () => {
+    try {
+      const { api } = await import('../services/api');
+      const { mapApiProject } = await import('../utils/projectMapper');
+      const res = await api.getProjects();
+      const mapped = res.projects.map((p: any) => mapApiProject(p));
+      set({ projects: mapped });
+    } catch (err) {
+      console.error('Failed to fetch projects', err);
+    }
+  },
+
+  fetchContractors: async () => {
+    try {
+      const { api } = await import('../services/api');
+      const res = await api.getContractors();
+      const mapped = res.contractors.map((c: any) => ({
+        id: c._id || c.id,
+        name: c.user_name || c.company,
+        company: c.company,
+        license: c.license,
+        email: c.email || '',
+        phone: c.phone || '',
+        rating: c.rating || 0,
+        completedProjects: c.completed_projects || 0,
+        activeProjects: c.active_projects || 0,
+        totalBudget: c.total_budget || 0,
+        regions: c.regions || [],
+        specialization: c.specialization || [],
+        performanceScore: c.performance_score || 0,
+        status: c.is_active ? ('active' as const) : ('suspended' as const),
+        joinedAt: c.created_at || new Date().toISOString(),
+        user_id: c.user_id
+      }));
+      set({ contractors: mapped });
+    } catch (err) {
+      console.error('Failed to fetch contractors', err);
+    }
+  },
+
+  fetchNotifications: async () => {
+    try {
+      const { api } = await import('../services/api');
+      const res = await api.getAlerts();
+      const mapped = res.alerts.map((a: any) => ({
+        id: a._id || a.id,
+        title: a.title,
+        message: a.message,
+        type: a.type,
+        read: a.read
+      }));
+      set({ notifications: mapped });
+    } catch (err) {
+      console.error('Failed to fetch alerts', err);
+    }
+  },
+
+  fetchBudgetEntries: async () => {
+    try {
+      const { api } = await import('../services/api');
+      const res = await api.getBudgetEntries();
+      const mapped = res.entries.map((b: any) => ({
+        id: b._id || b.id,
+        projectId: b.project_id,
+        projectTitle: b.project_title,
+        contractor: b.contractor,
+        amount: b.amount,
+        type: b.type,
+        status: b.status,
+        requestedAt: b.requested_at ? b.requested_at.split('T')[0] : '',
+        approvedAt: b.approved_at ? b.approved_at.split('T')[0] : undefined,
+        approvedBy: b.approved_by,
+        notes: b.notes,
+        district: b.district,
+        source: b.source,
+        sanctionReference: b.sanction_reference
+      }));
+      set({ budgetEntries: mapped });
+    } catch (err) {
+      console.error('Failed to fetch budget entries', err);
+    }
+  },
+
+  fetchSystemUsers: async () => {
+    try {
+      const { api } = await import('../services/api');
+      const res = await api.getSystemUsers();
+      const mapped = res.map((u: any) => ({
+        id: u._id || u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role as UserRole,
+        district: u.district,
+        state: u.state,
+        isActive: u.is_active,
+        createdAt: u.created_at ? u.created_at.split('T')[0] : ''
+      }));
+      set({ systemUsers: mapped });
+    } catch (err) {
+      console.error('Failed to fetch system users', err);
+    }
+  },
+
 }));

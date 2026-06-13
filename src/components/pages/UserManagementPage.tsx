@@ -60,47 +60,36 @@ export function UserManagementPage() {
   const contractors = systemUsers.filter(u => u.role === 'contractor').length;
   const govAdmins = systemUsers.filter(u => u.role === 'government').length;
 
-  function handleAddUser() {
+  async function handleAddUser() {
     if (!newName || !newEmail) return;
-    const id = `u${Date.now()}`;
-    const today = new Date().toISOString().split('T')[0];
-    addSystemUser({
-      id,
-      name: newName,
-      email: newEmail,
-      role: newRole,
-      district: newDistrict,
-      state: newState,
-      isActive: true,
-      createdAt: today
-    });
-    if (newRole === 'contractor') {
-      addContractor({
-        id,
+    try {
+      await addSystemUser({
+        id: '',
         name: newName,
-        company: `${newName} Infrastructure`,
-        license: `PENDING-${String(Date.now()).slice(-6)}`,
         email: newEmail,
-        phone: 'Not provided',
-        rating: 0,
-        completedProjects: 0,
-        activeProjects: 0,
-        totalBudget: 0,
-        regions: [newDistrict || 'Bangalore Urban'],
-        specialization: ['Road Repair'],
-        performanceScore: 0,
-        status: 'pending',
-        joinedAt: today
+        role: newRole,
+        district: newDistrict,
+        state: newState,
+        isActive: true,
+        createdAt: new Date().toISOString()
       });
+      setAddModal(false);
+      setNewName(''); setNewEmail(''); setNewRole('citizen'); setNewDistrict('');
+    } catch (error) {
+      console.error('Failed to register user:', error);
+      alert('Could not register user. Email might be already in use.');
     }
-    setAddModal(false);
-    setNewName(''); setNewEmail(''); setNewRole('citizen'); setNewDistrict('');
   }
 
-  function handleEditUser() {
+  async function handleEditUser() {
     if (!editUser) return;
-    updateSystemUser(editUser.id, { name: editName, role: editRole, district: editDistrict });
-    setEditUser(null);
+    try {
+      await updateSystemUser(editUser.id, { name: editName, role: editRole, district: editDistrict });
+      setEditUser(null);
+    } catch (error) {
+      console.error('Failed to update user:', error);
+      alert('Could not update user.');
+    }
   }
 
   function openEdit(u: SystemUser) {

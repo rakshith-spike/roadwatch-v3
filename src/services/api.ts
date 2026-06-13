@@ -498,6 +498,100 @@ class ApiService {
       resolution_rate: number;
     }>('/stats');
   }
+
+  // Budget
+  async getBudgetEntries(params?: { status?: string; type?: string; project_id?: string }) {
+    const searchParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined) searchParams.append(key, String(value));
+      });
+    }
+    return this.request<{ entries: any[]; total: number }>(`/budget?${searchParams}`);
+  }
+
+  async createBudgetEntry(data: {
+    project_id: string;
+    project_title: string;
+    contractor: string;
+    amount: number;
+    type: string;
+    notes?: string;
+    district: string;
+    source?: string;
+    sanction_reference?: string;
+  }) {
+    return this.request<any>('/budget/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async approveBudgetEntry(id: string) {
+    return this.request<any>(`/budget/${id}/approve`, {
+      method: 'POST',
+    });
+  }
+
+  async rejectBudgetEntry(id: string, notes?: string) {
+    const params = new URLSearchParams();
+    if (notes) params.append('notes', notes);
+    return this.request<any>(`/budget/${id}/reject?${params}`, {
+      method: 'POST',
+    });
+  }
+
+  // System Users
+  async getSystemUsers() {
+    return this.request<any[]>('/auth/users');
+  }
+
+  async updateSystemUser(id: string, data: { name?: string; role?: string; district?: string }) {
+    return this.request<any>(`/auth/users/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async toggleUserStatus(id: string) {
+    return this.request<any>(`/auth/users/${id}/toggle-status`, {
+      method: 'POST',
+    });
+  }
+
+  async registerUserByAdmin(data: {
+    name: string;
+    email: string;
+    password?: string;
+    role: string;
+    phone?: string;
+    district?: string;
+    state?: string;
+  }) {
+    return this.request<any>('/auth/register-user', {
+      method: 'POST',
+      body: JSON.stringify({
+        password: 'demo123',
+        ...data,
+      }),
+    });
+  }
+
+  // Alerts extra
+  async deleteAlert(id: string) {
+    return this.request<any>(`/alerts/${id}`, { method: 'DELETE' });
+  }
+
+  async checkHealth(): Promise<{ status: string; database: string; version: string }> {
+    const url = API_BASE_URL.replace(/\/api\/?$/, '') + '/health';
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('Health check failed');
+    }
+    return response.json();
+  }
 }
 
 export const api = new ApiService();
+
+

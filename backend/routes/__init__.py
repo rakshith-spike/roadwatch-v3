@@ -5,3 +5,5 @@ from .projects import router as projects_router
 from .analytics import router as analytics_router
 from .alerts import router as alerts_router
 from .ai import router as ai_router
+from .budget import router as budget_router
+

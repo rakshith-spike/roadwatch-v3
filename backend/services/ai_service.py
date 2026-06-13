@@ -277,16 +277,97 @@ Context: This is for Karnataka/Bangalore road infrastructure. Costs are in India
     
     @classmethod
     def chat_response(cls, message: str, context: Dict = None) -> str:
-        """Rule-based fallback chat responses"""
+        """Rule-based fallback chat responses (enhanced with context parsing)"""
         message_lower = message.lower()
+        
+        # 1. Parse context
+        projects = []
+        complaints = []
+        contractors = []
+        user_info = {}
+        
+        if context:
+            projects = context.get("projectsSummary", [])
+            complaints = context.get("complaintsSummary", [])
+            contractors = context.get("contractorsSummary", [])
+            user_info = context.get("user", {})
+
+        # Helper to format currency
+        def fmt_rupees(val):
+            try:
+                val = float(val)
+                if val >= 10000000:
+                    return f"₹{val/10000000:.2f}Cr"
+                elif val >= 100000:
+                    return f"₹{val/100000:.1f}L"
+                else:
+                    return f"₹{val:,.2f}"
+            except:
+                return f"₹{val}"
+
+        # 2. Check for budget / cost queries
+        if any(word in message_lower for word in ["budget", "spent", "spend", "cost", "compare"]):
+            if projects:
+                lines = []
+                for p in projects:
+                    lines.append(f"• **{p.get('title')}**: Budget {fmt_rupees(p.get('budget'))} | Spent {fmt_rupees(p.get('spent'))} ({p.get('progress')}% progress)")
+                resp = "Here is the project budget and expenditure breakdown from the current registry:\n\n" + "\n".join(lines) + "\n\nI have generated an interactive budget comparison chart for you below.\n[Chart: budget]"
+                return resp
+            else:
+                return "I couldn't find any projects in the current district context to compare budgets. [Chart: budget]"
+
+        # 3. Check for progress / timeline queries
+        if any(word in message_lower for word in ["progress", "timeline", "complete", "status of road", "status of project"]):
+            if projects:
+                lines = []
+                for p in projects:
+                    lines.append(f"• **{p.get('title')}**: {p.get('progress')}% complete ({p.get('status')})")
+                resp = "Here is the work progress breakdown of current road projects:\n\n" + "\n".join(lines) + "\n\nI have generated an interactive progress chart for you below.\n[Chart: progress]"
+                return resp
+            else:
+                return "I couldn't find any active road projects in the current context. [Chart: progress]"
+
+        # 4. Check for complaints / severity queries
+        if any(word in message_lower for word in ["complaint", "issue", "severity", "pothole", "crack", "drainage", "flood", "light"]):
+            # Specific complaint ID lookup
+            import re
+            c_ids = re.findall(r'[cx]\d{3}', message_lower)
+            if c_ids and complaints:
+                target_id = c_ids[0].upper()
+                match = next((c for c in complaints if c.get("id").upper() == target_id), None)
+                if match:
+                    return f"Complaint **{match.get('id')}**: \"{match.get('title')}\"\n• Severity: **{match.get('severity').upper()}**\n• Status: {match.get('status').replace('_', ' ').capitalize()}\n\nLet me know if you would like to route this or assign a contractor."
+
+            # General severity distribution
+            if complaints:
+                critical_count = sum(1 for c in complaints if c.get("severity") == "critical")
+                high_count = sum(1 for c in complaints if c.get("severity") == "high")
+                pending_count = sum(1 for c in complaints if c.get("status") == "pending")
+                
+                resp = f"There are currently **{len(complaints)} complaints** in the system:\n"
+                resp += f"• **{critical_count} Critical** severity issues\n"
+                resp += f"• **{high_count} High** severity issues\n"
+                resp += f"• **{pending_count} Pending** verification\n\nI have compiled the severity distribution breakdown for you below.\n[Chart: severity]"
+                return resp
+            else:
+                return "There are no complaints recorded in the current context. [Chart: severity]"
+
+        # 5. Check for contractor queries
+        if any(word in message_lower for word in ["contractor", "company", "builder", "rating"]):
+            if contractors:
+                lines = []
+                for c in contractors:
+                    lines.append(f"• **{c.get('company')}** ({c.get('name')}): Rating ★{c.get('rating') or 0:.1f} | Status: {c.get('status')}")
+                return "Registered Contractor Registry:\n\n" + "\n".join(lines)
+            else:
+                return "There are no active contractor profiles in the current context."
+
+        # 6. Default fallbacks
         if any(word in message_lower for word in ["hello", "hi", "hey"]):
-            return "Hello! I'm the ROAD-WATCH AI Assistant. How can I help you today? I can assist with filing complaints, tracking status, or providing information about road infrastructure."
-        if any(word in message_lower for word in ["file", "report", "complaint", "issue"]):
-            return """I can help you file a new complaint! Here's the process:\n\n1. **Describe the issue** - Tell me about the problem (pothole, street light, drainage, etc.)\n2. **Add photos** - Upload images for faster processing\n3. **Confirm location** - I can auto-detect or you can enter manually\n4. **Submit** - You'll receive a tracking ID\n\nWould you like me to start the complaint process?"""
-        if any(word in message_lower for word in ["status", "track", "check"]):
-            return """To track your complaint status, I need your complaint ID.\n\nYou can find your complaint ID in:\n- The confirmation email sent when you filed the complaint\n- Your dashboard under "My Complaints"\n\nPlease provide the complaint ID and I'll fetch the latest status for you."""
-        if any(word in message_lower for word in ["analytics", "stats", "statistics"]):
-            return """Here's a summary of current analytics:\n\n📊 **This Month:**\n- Total Complaints: 1,856\n- Resolution Rate: 82%\n- Average Response Time: 4.2 days\n\n📈 **Trending Issues:**\n1. Potholes (42%)\n2. Drainage (28%)\n3. Street Lights (15%)\n\nWould you like more detailed analytics or specific district data?"""
-        return """I understand you're asking about road infrastructure. Here's what I can help with:\n\n• **Report Issues** - File new complaints with AI assistance\n• **Track Status** - Check your complaint progress\n• **Analytics** - View statistics and trends\n• **Information** - Road conditions, nearby issues\n\nPlease tell me more specifically what you'd like to know!"""
+            user_name = user_info.get("name", "").split(" ")[0]
+            greeting = f"Hello, {user_name}!" if user_name else "Hello!"
+            return f"{greeting} I'm the ROAD-WATCH AI Assistant. How can I help you today? I can analyze budgets, compare project progress, show complaint hotspots, or retrieve contractor ratings."
+            
+        return "I can assist with road infrastructure. Ask me about:\n• \"compare budget\" (displays budget vs spent chart)\n• \"project progress\" (shows progress percentages chart)\n• \"complaints severity\" (renders severity distribution chart)\n• \"contractor ratings\" (lists registered contractors)\n\nPlease let me know what you would like to analyze!"
 
 ai_service = AIService()

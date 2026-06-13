@@ -53,14 +53,12 @@ export function ContractorManagementPage() {
     return 'danger';
   }
 
-  function suspendAndReflect(id: string) {
-    suspendContractor(id);
-    updateSystemUser(id, { isActive: false });
+  async function suspendAndReflect(id: string) {
+    await suspendContractor(id);
   }
 
-  function activateAndReflect(id: string) {
-    activateContractor(id);
-    updateSystemUser(id, { isActive: true });
+  async function activateAndReflect(id: string) {
+    await activateContractor(id);
   }
 
   return (

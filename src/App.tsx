@@ -16,16 +16,14 @@ import { ContractorManagementPage } from './components/pages/ContractorManagemen
 import { BudgetPage } from './components/pages/BudgetPage';
 import { UserManagementPage } from './components/pages/UserManagementPage';
 import { WorkProgressPage } from './components/pages/WorkProgressPage';
-import {
-  AuditLogsPage,
-  HelpCenterPage,
-  NationalOverviewPage,
-  RegionsPage,
-  ReportsPage,
-  SettingsPage,
-  SystemHealthPage,
-  TransparencyPage
-} from './components/pages/PrototypePages';
+import { AuditLogsPage } from './components/pages/AuditLogsPage';
+import { HelpCenterPage } from './components/pages/HelpCenterPage';
+import { NationalOverviewPage } from './components/pages/NationalOverviewPage';
+import { RegionsPage } from './components/pages/RegionsPage';
+import { ReportsPage } from './components/pages/ReportsPage';
+import { SettingsPage } from './components/pages/SettingsPage';
+import { SystemHealthPage } from './components/pages/SystemHealthPage';
+import { TransparencyPage } from './components/pages/TransparencyPage';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from './services/api';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
@@ -75,7 +73,7 @@ function DashboardContent() {
 }
 
 export default function App() {
-  const { isAuthenticated, setUser } = useStore();
+  const { isAuthenticated, setUser, user } = useStore();
 
   // Re-hydrate session from stored token on page load
   useEffect(() => {
@@ -138,8 +136,18 @@ export default function App() {
           useStore.setState({ complaints: mappedComplaints });
         }
       }).catch(e => console.error('Failed to fetch complaints', e));
+
+      const store = useStore.getState();
+      store.fetchProjects();
+      store.fetchContractors();
+      store.fetchNotifications();
+      store.fetchBudgetEntries();
+
+      if (user?.role === 'government' || user?.role === 'superadmin') {
+        store.fetchSystemUsers();
+      }
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, user?.role]);
 
   return (
     <ErrorBoundary>

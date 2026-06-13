@@ -28,7 +28,8 @@ export function BudgetPage() {
   const isContractor = user?.role === 'contractor';
   const isGovOrAdmin = user?.role === 'government' || user?.role === 'superadmin';
 
-  const myContractorCompany = isContractor ? 'Kumar Infrastructure Pvt Ltd' : null;
+  const contractorProfile = contractors.find(c => c.id === user?.contractorId || c.user_id === user?.id);
+  const myContractorCompany = contractorProfile?.company || user?.name || null;
 
   const filtered = budgetEntries.filter(e => {
     if (isContractor && myContractorCompany && e.contractor !== myContractorCompany) return false;
@@ -89,7 +90,7 @@ export function BudgetPage() {
     return <Badge variant="warning" dot pulse>Pending</Badge>;
   }
 
-  const contractorProjects = isContractor ? projects.filter(p => p.contractor === 'contractor1') : projects;
+  const contractorProjects = isContractor ? projects.filter(p => p.contractor === user?.contractorId) : projects;
 
   return (
     <div className="space-y-6">
@@ -196,6 +197,12 @@ export function BudgetPage() {
                     <p className="text-sm text-surface-400">{entry.contractor} • {entry.district}</p>
                     <p className="text-xs text-surface-500 mt-1">Source: {entry.source || 'Not specified'} • Ref: {entry.sanctionReference || 'NA'}</p>
                     {entry.notes && <p className="text-xs text-surface-500 mt-1 italic">{entry.notes}</p>}
+                    {entry.status === 'pending' && entry.amount > 150000 && (
+                      <div className="mt-2 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-danger-500/10 border border-danger-500/20 text-danger-400 text-xs w-fit">
+                        <AlertTriangle className="w-3.5 h-3.5 animate-pulse" />
+                        <span>AI Audit Flag: Exceeds standard ward limit. Review recommended</span>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-4">

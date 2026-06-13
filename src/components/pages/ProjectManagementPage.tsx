@@ -37,7 +37,6 @@ export function ProjectManagementPage() {
   const [createModal, setCreateModal] = useState(false);
   const [workLogModal, setWorkLogModal] = useState<string | null>(null);
   const [progressModal, setProgressModal] = useState<string | null>(null);
-  const [backendProjects, setBackendProjects] = useState<Project[]>([]);
 
   // Work log form
   const [wlDesc, setWlDesc] = useState('');
@@ -67,22 +66,8 @@ export function ProjectManagementPage() {
   const isContractor = user?.role === 'contractor';
   const isGovOrAdmin = user?.role === 'government' || user?.role === 'superadmin';
 
-  async function refreshContractorProjects() {
-    if (!isContractor) return;
-    const response = await api.getProjects();
-    setBackendProjects(response.projects.map((project: any) => mapApiProject(project, user?.name)));
-  }
-
-  useEffect(() => {
-    if (!isContractor) return;
-    refreshContractorProjects().catch((error) => {
-      console.error('Failed to load contractor projects:', error);
-      setBackendProjects([]);
-    });
-  }, [isContractor, user?.name]);
-
-  const sourceProjects = isContractor ? backendProjects : projects;
-  const visibleProjects = sourceProjects.filter(p => {
+  const visibleProjects = projects.filter(p => {
+    if (isContractor && p.contractor !== user?.contractorId) return false;
     if (filterStatus !== 'all' && p.status !== filterStatus) return false;
     if (search && !p.title.toLowerCase().includes(search.toLowerCase()) &&
         !p.location.address.toLowerCase().includes(search.toLowerCase())) return false;
@@ -137,82 +122,61 @@ export function ProjectManagementPage() {
 
   async function handleAddWorkLog(projectId: string) {
     if (!wlDesc) return;
-    if (isContractor) {
-      try {
-        await api.addProjectWorkLog(projectId, {
-          description: wlDesc,
-          workers_count: parseInt(wlWorkers) || 0,
-          materials_used: wlMaterials.split(',').map(s => s.trim()).filter(Boolean)
+    try {
+      await addWorkLog(projectId, {
+        id: `wl${Date.now()}`, date: new Date().toISOString().split('T')[0],
+        description: wlDesc, workersCount: parseInt(wlWorkers) || 0,
+        materialsUsed: wlMaterials.split(',').map(s => s.trim()).filter(Boolean),
+        photos: [], addedBy: user?.name || 'Contractor'
+      });
+      // Auto-start project if progress is 0 or status is planned
+      const currentProj = projects.find(p => p.id === projectId);
+      if (currentProj && (currentProj.status === 'planned' || currentProj.progress === 0)) {
+        await updateProject(projectId, {
+          status: 'in_progress',
+          progress: Math.max(5, currentProj.progress)
         });
-        await api.updateProject(projectId, { status: 'in_progress', progress: Math.max(5, visibleProjects.find(p => p.id === projectId)?.progress || 0) });
-        await refreshContractorProjects();
-        setWorkLogModal(null); setWlDesc(''); setWlWorkers(''); setWlMaterials('');
-      } catch (error) {
-        console.error('Failed to add backend work log:', error);
-        alert('Could not submit work log for this assigned project.');
       }
-      return;
+      setWorkLogModal(null); setWlDesc(''); setWlWorkers(''); setWlMaterials('');
+    } catch (error) {
+      console.error('Failed to add work log:', error);
+      alert('Could not submit work log for this project.');
     }
-    addWorkLog(projectId, {
-      id: `wl${Date.now()}`, date: new Date().toISOString().split('T')[0],
-      description: wlDesc, workersCount: parseInt(wlWorkers) || 0,
-      materialsUsed: wlMaterials.split(',').map(s => s.trim()).filter(Boolean),
-      photos: [], addedBy: user?.name || 'Contractor'
-    });
-    setWorkLogModal(null); setWlDesc(''); setWlWorkers(''); setWlMaterials('');
   }
 
   async function handleUpdateProgress(projectId: string) {
     const p = parseInt(newProgress);
     if (isNaN(p) || p < 0 || p > 100) return;
-    if (isContractor) {
-      try {
-        const nextStatus = (newProjectStatus as any) || (p >= 100 ? 'completed' : p > 0 ? 'in_progress' : 'planned');
-        await api.updateProject(projectId, {
-          progress: p,
-          status: nextStatus,
-          spent: nextStatus === 'completed' ? visibleProjects.find(pr => pr.id === projectId)?.budget : undefined
-        });
-        await refreshContractorProjects();
-        setProgressModal(null);
-      } catch (error) {
-        console.error('Failed to update backend project:', error);
-        alert('Could not update this assigned project.');
-      }
-      return;
+    try {
+      const nextStatus = (newProjectStatus as any) || (p >= 100 ? 'completed' : p > 0 ? 'in_progress' : 'planned');
+      const proj = projects.find(pr => pr.id === projectId);
+      await updateProject(projectId, {
+        progress: p,
+        status: nextStatus,
+        spent: nextStatus === 'completed' ? proj?.budget : undefined
+      });
+      setProgressModal(null);
+    } catch (error) {
+      console.error('Failed to update project progress:', error);
+      alert('Could not update project progress.');
     }
-    updateProject(projectId, {
-      progress: p,
-      status: (newProjectStatus as any) || undefined,
-      spent: newProjectStatus === 'completed' ? projects.find(pr => pr.id === projectId)?.budget : undefined
-    });
-    setProgressModal(null);
   }
 
   async function handleMarkComplete(projectId: string) {
-    const project = sourceProjects.find(pr => pr.id === projectId);
+    const project = projects.find(pr => pr.id === projectId);
     if (!project) return;
-    if (isContractor) {
-      try {
-        await api.updateProject(projectId, {
-          progress: 100,
-          status: 'completed',
-          spent: project.budget
-        });
-        await refreshContractorProjects();
-      } catch (error) {
-        console.error('Failed to complete backend project:', error);
-        alert('Could not mark this assigned project complete.');
-      }
-      return;
+    try {
+      await updateProject(projectId, {
+        progress: 100,
+        status: 'completed',
+        spent: project.budget,
+        milestones: project.milestones.map((milestone) => ({ ...milestone, completed: true })),
+        notes: `${project.notes ? `${project.notes}\n` : ''}Completed and ready for final quality verification.`
+      } as any);
+    } catch (error) {
+      console.error('Failed to mark project complete:', error);
+      alert('Could not mark project complete.');
     }
-    updateProject(projectId, {
-      progress: 100,
-      status: 'completed',
-      spent: project.budget,
-      milestones: project.milestones.map((milestone) => ({ ...milestone, completed: true })),
-      notes: `${project.notes ? `${project.notes}\n` : ''}Completed and ready for final quality verification.`
-    } as any);
   }
 
   const unverifiedComplaints = complaints.filter(c => c.status === 'verified' || c.status === 'pending');

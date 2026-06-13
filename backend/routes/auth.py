@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, status, Depends
+from typing import List
 from datetime import datetime
 from bson import ObjectId
 import asyncio
@@ -9,7 +10,8 @@ from utils.security import (
     get_password_hash, 
     verify_password, 
     create_access_token,
-    get_current_user
+    get_current_user,
+    require_roles
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -194,3 +196,156 @@ async def update_profile(
 async def logout(current_user: dict = Depends(get_current_user)):
     """Logout user (client should discard token)"""
     return {"message": "Successfully logged out"}
+
+
+# ── ADMIN USER MANAGEMENT ENDPOINTS ───────────────────────────────────────────
+
+@router.get("/users", response_model=List[UserResponse])
+async def list_system_users(
+    current_user: dict = Depends(require_roles(["government", "superadmin"]))
+):
+    """List all platform users."""
+    db = get_database()
+    users = await db.users.find({}).to_list(200)
+    enriched_users = []
+    for u in users:
+        u_serialized = await _attach_contractor_id(db, u)
+        enriched_users.append(UserResponse(
+            _id=str(u_serialized["_id"]),
+            name=u_serialized["name"],
+            email=u_serialized["email"],
+            phone=u_serialized.get("phone"),
+            district=u_serialized.get("district"),
+            state=u_serialized.get("state"),
+            role=u_serialized["role"],
+            created_at=u_serialized["created_at"],
+            is_active=u_serialized.get("is_active", True),
+            contractor_id=u_serialized.get("contractor_id")
+        ))
+    return enriched_users
+
+
+@router.put("/users/{user_id}", response_model=UserResponse)
+async def update_user_details(
+    user_id: str,
+    update_data: UserUpdate,
+    current_user: dict = Depends(require_roles(["government", "superadmin"]))
+):
+    """Update a specific user's profile information."""
+    db = get_database()
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="Invalid user ID format.")
+
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    update_dict = {k: v for k, v in update_data.model_dump().items() if v is not None}
+    if update_dict:
+        await db.users.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": update_dict}
+        )
+
+    updated_user = await db.users.find_one({"_id": ObjectId(user_id)})
+    updated_user = await _attach_contractor_id(db, updated_user)
+    return UserResponse(
+        _id=str(updated_user["_id"]),
+        name=updated_user["name"],
+        email=updated_user["email"],
+        phone=updated_user.get("phone"),
+        district=updated_user.get("district"),
+        state=updated_user.get("state"),
+        role=updated_user["role"],
+        created_at=updated_user["created_at"],
+        is_active=updated_user.get("is_active", True),
+        contractor_id=updated_user.get("contractor_id")
+    )
+
+
+@router.post("/users/{user_id}/toggle-status")
+async def toggle_user_active_status(
+    user_id: str,
+    current_user: dict = Depends(require_roles(["government", "superadmin"]))
+):
+    """Toggle a user's active/inactive status."""
+    db = get_database()
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(status_code=400, detail="Invalid user ID format.")
+
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    new_status = not user.get("is_active", True)
+    await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {"is_active": new_status}}
+    )
+
+    # If contractor, also toggle status of their contractor profile
+    if user.get("role") == "contractor":
+        await db.contractors.update_one(
+            {"user_id": ObjectId(user_id)},
+            {"$set": {"status": "active" if new_status else "suspended"}}
+        )
+
+    return {"message": f"User status toggled successfully. Active: {new_status}", "is_active": new_status}
+
+
+@router.post("/register-user", response_model=UserResponse)
+async def register_user_by_admin(
+    user_data: UserCreate,
+    current_user: dict = Depends(require_roles(["government", "superadmin"]))
+):
+    """Register a new user by an admin without changing current session."""
+    db = get_database()
+    
+    # Check if email already exists
+    existing_user = await db.users.find_one({"email": user_data.email})
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    user_dict = user_data.model_dump()
+    user_dict["password"] = get_password_hash(user_dict["password"])
+    user_dict["created_at"] = datetime.utcnow()
+    user_dict["is_active"] = True
+    
+    result = await db.users.insert_one(user_dict)
+    user_dict["_id"] = result.inserted_id
+    
+    # If contractor, create profile
+    if user_dict["role"] == "contractor":
+        contractor_doc = {
+            "user_id": user_dict["_id"],
+            "company": f"{user_dict['name']} Infrastructure",
+            "license": f"PENDING-{str(user_dict['_id'])[-6:]}",
+            "rating": 0.0,
+            "completed_projects": 0,
+            "active_projects": 0,
+            "total_budget": 0.0,
+            "regions": [user_dict.get("district", "Bangalore Urban")],
+            "specialization": ["General Road Repair"],
+            "performance_score": 0,
+            "created_at": datetime.utcnow()
+        }
+        c_result = await db.contractors.insert_one(contractor_doc)
+        user_dict["contractor_id"] = str(c_result.inserted_id)
+
+    return UserResponse(
+        _id=str(user_dict["_id"]),
+        name=user_dict["name"],
+        email=user_dict["email"],
+        phone=user_dict.get("phone"),
+        district=user_dict.get("district"),
+        state=user_dict.get("state"),
+        role=user_dict["role"],
+        created_at=user_dict["created_at"],
+        is_active=user_dict["is_active"],
+        contractor_id=user_dict.get("contractor_id")
+    )
+
+
